@@ -15,7 +15,9 @@ services, no API keys, no data leaving your machine.
   `--allow example.com/page` matches `example.com/page/quote` but never `example.com/page2`.
 - **Politeness built in** — robots.txt is always respected (including `Crawl-delay`),
   HTTP `Retry-After` is honored with a temporary pause plus one automatic retry, requests
-  are paced per host, and redirect targets are scope-checked *before* they are fetched.
+  are paced per host, and every redirect target is scope- and robots-checked *before* it
+  is fetched. Timeouts, network, parsing, and database errors are counted separately in
+  the crawl summary.
 - **Fast and multithreaded** — configurable worker pool (`--threads`), streamed downloads
   with a per-page size cap, and batched database commits.
 - **Quality search ranking** — SQLite FTS5 with BM25, weighting title matches 5x and
@@ -56,8 +58,7 @@ CONTACT_EMAIL=you@example.com
 
 This is entirely optional — if `.env` is missing, unreadable, or `CONTACT_EMAIL` is
 left empty, the crawler simply identifies itself as `ModelSearchEngine (educational
-crawler)` with no contact section. No setup step is required and nothing errors out.
-`.env` is in `.gitignore`, so your address stays local to your checkout.
+crawler)` with no contact section. 
 
 ## Usage
 
@@ -142,8 +143,7 @@ python main.py search "interesting topic" --limit 25
   robots.txt, downloaded with a size cap, parsed for links (which are scoped and queued
   even if the page itself cannot be indexed), and its text is upserted into the index —
   batched and crash-safe. Redirects are followed manually with scope checks before every
-  hop and a 10-hop limit. Rate limiting is per hostname, so workers on different hosts
-  never slow each other down.
+  hop and a 10-hop limit.
 - **Search:** queries are reduced to plain words (letters/digits only — FTS5 syntax
   cannot be injected), matched with AND semantics and prefix expansion, falling back to
   OR when AND finds nothing, and ranked by BM25 with title/description weighting.
@@ -168,8 +168,6 @@ python tests/verify_ctrlc.py              # real-signal Ctrl+C verification
 ```
 main.py            crawler + search engine + CLI (single file)
 requirements.txt   pinned dependencies
-param.txt          every parameter: accepted inputs and explanations
-PROJECT.md         technical docs: architecture, decisions, full test changelog
 tests/             unit tests, CLI smoke test, Ctrl+C verification script
 ```
 
@@ -180,5 +178,4 @@ tests/             unit tests, CLI smoke test, Ctrl+C verification script
   one (see [Contact email](#contact-email-optional)) — and obeys robots.txt. Please use
   it respectfully and in line with the terms of the sites you crawl.
 - The index (`result.db`) is created on first crawl and reused afterwards; re-crawling
-  a page updates it rather than duplicating it. Searching before any crawl prints a
-  friendly "No database found" message instead of failing.
+  a page updates it rather than duplicating it. 

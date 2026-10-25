@@ -50,13 +50,8 @@ def main():
         with tempfile.TemporaryDirectory() as tmp:
             tmp = pathlib.Path(tmp)
             shutil.copy2(PROJECT / "main.py", tmp / "main.py")
-            # The temp copy alone allows the local server's port;
-            # scope is derived from the seed URL automatically.
-            script = (tmp / "main.py").read_text(encoding="utf-8")
-            script = script.replace(
-                "ALLOWED_PORTS = {80, 443}",
-                f"ALLOWED_PORTS = {{80, 443, {server.port}}}")
-            (tmp / "main.py").write_text(script, encoding="utf-8")
+            # Scope is derived from the seed URL automatically, and any
+            # port is crawlable by default, so the copy needs no edits.
 
             def run(*args):
                 started = time.perf_counter()

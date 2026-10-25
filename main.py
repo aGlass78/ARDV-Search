@@ -24,7 +24,15 @@ MAX_REDIRECTS = 10
 DB_COMMIT_BATCH = 25
 ROBOTS_RETRY_SECONDS = 300.0
 
-ALLOWED_PORTS = {80, 443}
+# Optional, explicit port policy. None (the default) means any valid
+# port may be crawled; set to a set of ints, e.g. {80, 443}, to
+# deliberately restrict the crawler (say, away from internal
+# services). Malformed ports are rejected regardless of this setting.
+ALLOWED_PORTS = None
+
+# Seconds before a page request is abandoned as a timeout.
+REQUEST_TIMEOUT = 20.0
+
 STANDARD_PORTS = {"http": 80, "https": 443}
 
 SKIP_EXTENSIONS = (
@@ -224,8 +232,10 @@ SEARCH Command
                         be loaded, its pages are skipped and the
                         robots.txt is retried after this long.
 
-  ALLOWED_PORTS          {80, 443} — pages are only fetched on the
-                        standard web ports (http/https).
+  ALLOWED_PORTS          Optional port policy: None (the default)
+                        means any valid port is crawled; set it to a
+                        set of ports, e.g. {80, 443}, to deliberately
+                        restrict where the crawler may connect.
 
   STANDARD_PORTS         http://site:80 is treated the same as
                         http://site (and https://site:443 the same as
@@ -340,7 +350,9 @@ def normalize_url(url):
     except ValueError:
         return None
 
-    if port is not None and port not in ALLOWED_PORTS:
+    if (ALLOWED_PORTS is not None
+            and port is not None
+            and port not in ALLOWED_PORTS):
         return None
 
     if port is not None and STANDARD_PORTS.get(parsed.scheme) == port:
@@ -420,6 +432,29 @@ def host_of(url):
     return (urlparse(url).hostname or "").lower()
 
 
+def origin_of(url):
+    """Origin key for robots.txt: scheme + hostname + effective port.
+
+    Two schemes can serve completely different robots policies, so
+    http://example.com and https://example.com must never share
+    cached rules; neither may the same host on another port. Default
+    ports fold into their scheme (http://x:80 == http://x).
+    """
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    hostname = (parsed.hostname or "").lower()
+
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+
+    if port is None:
+        port = STANDARD_PORTS.get(scheme, "")
+
+    return f"{scheme}://{hostname}:{port}"
+
+
 def is_allowed_url(url, scope):
     """True when the URL matches any scope rule.
 
@@ -468,8 +503,8 @@ class RobotsCache:
         (ROBOTS_RETRY_SECONDS) so a transient outage never excludes a
         host permanently.
         """
+        origin = origin_of(url)
         parsed = urlparse(url)
-        origin = parsed.netloc.lower()
 
         with self._lock:
             if origin in self._rules:
@@ -547,21 +582,28 @@ def parse_retry_after(value):
 
 
 def fetch_html(session, url, max_bytes, scope=None,
-               limiter=None):
+               limiter=None, robots_cache=None):
     """Download a bounded HTML response, following redirects manually.
 
-    The scope of every redirect target is checked BEFORE the hop is
-    followed, so an out-of-scope Location is never fetched - the old
-    auto-redirect behavior downloaded the other site's page first and
-    only then discarded it. Each hop is paced by the limiter, and
-    chains stop after MAX_REDIRECTS hops (loops are abandoned, not
-    followed forever).
+    The scope AND robots.txt of every redirect destination are checked
+    BEFORE the hop is followed: an out-of-scope target, a disallowed
+    path, or an origin whose robots.txt cannot be verified stops the
+    chain without fetching the target - the old auto-redirect behavior
+    downloaded the other site's page first and only then discarded it.
+    Each hop is paced by the limiter, and chains stop after
+    MAX_REDIRECTS hops (loops are abandoned, not followed forever).
+    Robots checks go through robots_cache, so a chain that stays on
+    one origin never fetches robots.txt twice, and workers sharing the
+    cache never hold its lock across network I/O (no deadlocks, and no
+    duplicate fetch storms beyond a bounded cold-cache race).
 
-    Returns (response, text, final_url). final_url is None when the
-    chain was abandoned (out of scope, invalid Location, or too many
-    hops); then response and text are None as well. Otherwise text is
-    None when the body was skipped (non-200, non-HTML, or larger than
-    max_bytes). The caller must close the response.
+    Returns (response, text, final_url, reason). final_url is None
+    when the chain was abandoned; reason then says why:
+    "out_of_scope" (scope violation, invalid Location, or too many
+    hops), "robots_blocked", or "robots_unavailable". Otherwise reason
+    is None, and text is None only when the body was skipped (non-200,
+    non-HTML, or larger than max_bytes). The caller must close the
+    response.
     """
     current = url
     response = None
@@ -573,7 +615,7 @@ def fetch_html(session, url, max_bytes, scope=None,
 
             response = session.get(
                 current,
-                timeout=20,
+                timeout=REQUEST_TIMEOUT,
                 allow_redirects=False,
                 stream=True
             )
@@ -595,20 +637,40 @@ def fetch_html(session, url, max_bytes, scope=None,
                     scope is not None
                     and not is_allowed_url(
                         next_url, scope)):
-                return None, None, None
+                return None, None, None, "out_of_scope"
+
+            # Verify the destination's robots rules before following
+            # the hop - never fetch a target we may not crawl. The
+            # cache makes this cheap for same-origin chains.
+            if robots_cache is not None:
+                robots = robots_cache.rules_for(
+                    session, next_url, limiter)
+
+                if robots is None:
+                    return (None, None, None,
+                            "robots_unavailable")
+
+                crawl_delay = robots.crawl_delay(USER_AGENT)
+
+                if crawl_delay and limiter is not None:
+                    limiter.set_min_delay(
+                        host_of(next_url), crawl_delay)
+
+                if not robots.can_fetch(USER_AGENT, next_url):
+                    return None, None, None, "robots_blocked"
 
             current = next_url
         else:
             # Still redirecting after MAX_REDIRECTS hops.
-            return None, None, None
+            return None, None, None, "out_of_scope"
 
         if response.status_code != 200:
-            return response, None, current
+            return response, None, current, None
 
         if "text/html" not in response.headers.get(
             "Content-Type", ""
         ).lower():
-            return response, None, current
+            return response, None, current, None
 
         try:
             content_length = int(
@@ -618,7 +680,7 @@ def fetch_html(session, url, max_bytes, scope=None,
             content_length = None
 
         if content_length is not None and content_length > max_bytes:
-            return response, None, current
+            return response, None, current, None
 
         chunks = []
         total = 0
@@ -627,7 +689,7 @@ def fetch_html(session, url, max_bytes, scope=None,
             total += len(chunk)
 
             if total > max_bytes:
-                return response, None, current
+                return response, None, current, None
 
             chunks.append(chunk)
 
@@ -640,7 +702,7 @@ def fetch_html(session, url, max_bytes, scope=None,
         html = b"".join(chunks).decode(
             encoding, errors="replace"
         )
-        return response, html, current
+        return response, html, current, None
 
     except requests.RequestException:
         if response is not None:
@@ -710,18 +772,34 @@ def process_url(
     response = None
 
     try:
-        # fetch_html paces every hop itself (scope is checked before
-        # any redirect is followed).
-        response, html, final_url = fetch_html(
-            session, url, max_bytes, scope, limiter
+        # fetch_html paces and robots-checks every hop itself before
+        # following it.
+        response, html, final_url, abandon_reason = fetch_html(
+            session, url, max_bytes, scope, limiter, robots_cache
         )
 
         if final_url is None:
-            result["status"] = "out_of_scope"
-            result["message"] = (
-                "Redirect left the allowed scope "
-                f"(or looped); skipping: {url}"
-            )
+            # Map the abandon reason to its own status so the stats
+            # stay honest. At least one request (the hop that
+            # redirected) was already made, so count it.
+            if abandon_reason == "robots_blocked":
+                result["status"] = "robots_blocked"
+                result["message"] = (
+                    f"Redirect target blocked by robots.txt: {url}"
+                )
+            elif abandon_reason == "robots_unavailable":
+                result["status"] = "robots_unavailable"
+                result["message"] = (
+                    "Redirect target robots.txt could not be "
+                    f"verified: {url}"
+                )
+            else:
+                result["status"] = "out_of_scope"
+                result["message"] = (
+                    "Redirect left the allowed scope "
+                    f"(or looped); skipping: {url}"
+                )
+            result["requests_made"] = True
             return result
 
         if response.status_code in (429, 503):
@@ -816,13 +894,21 @@ def process_url(
         result["status"] = "success"
         return result
 
+    except requests.Timeout as error:
+        # Timeouts get their own counter: they usually mean the site
+        # is slow or gone, not that the request was malformed.
+        result["status"] = "timeout"
+        result["message"] = f"Request timed out: {url} ({error})"
+        return result
+
     except requests.RequestException as error:
-        result["status"] = "error"
+        result["status"] = "network_error"
         result["message"] = f"Request failed: {url} ({error})"
         return result
 
     except Exception as error:
-        result["status"] = "error"
+        # Parsing/processing failures (BeautifulSoup etc.).
+        result["status"] = "parse_error"
         result["message"] = f"Processing failed: {url} ({error})"
         return result
 
@@ -880,7 +966,11 @@ def crawl(
         "http_errors": 0,
         "rate_limited": 0,
         "rate_limited_retries": 0,
-        "errors": 0,
+        "errors": 0,           # total of all failures below
+        "timeouts": 0,         # requests that timed out
+        "network_errors": 0,   # other transport failures
+        "parse_errors": 0,     # HTML processing failures
+        "db_errors": 0,        # SQLite failures
         "robots_blocked": 0,
         "robots_unavailable": 0,
         "non_html": 0,
@@ -971,10 +1061,16 @@ def crawl(
                     print(result["message"])
 
                 if status == "robots_blocked":
+                    # Initial-URL blocks made no request; mid-chain
+                    # blocks (redirect targets) already made one.
+                    if result.get("requests_made"):
+                        stats["requests"] += 1
                     stats["robots_blocked"] += 1
                     continue
 
                 if status == "robots_unavailable":
+                    if result.get("requests_made"):
+                        stats["requests"] += 1
                     stats["robots_unavailable"] += 1
                     continue
 
@@ -1015,7 +1111,23 @@ def crawl(
                     stats["out_of_scope"] += 1
                     continue
 
+                if status == "timeout":
+                    stats["timeouts"] += 1
+                    stats["errors"] += 1
+                    continue
+
+                if status == "network_error":
+                    stats["network_errors"] += 1
+                    stats["errors"] += 1
+                    continue
+
+                if status == "parse_error":
+                    stats["parse_errors"] += 1
+                    stats["errors"] += 1
+                    continue
+
                 if status == "error":
+                    # Unclassified worker crash.
                     stats["errors"] += 1
                     continue
 
@@ -1072,6 +1184,7 @@ def crawl(
                     # Roll back the open batch rather than keep a
                     # half-written page; affected pages are simply
                     # re-crawled on the next run.
+                    stats["db_errors"] += 1
                     stats["errors"] += 1
                     print(
                         f"Database error for {final_url}: {error}"
@@ -1172,8 +1285,14 @@ def print_crawl_summary(stats):
         f"{stats['out_of_scope']} out-of-scope"
     )
     print(
-        f"Robots unavailable: {stats['robots_unavailable']}, "
-        f"transport/parsing/db errors: {stats['errors']}"
+        f"Robots unavailable: {stats['robots_unavailable']}"
+    )
+    print(
+        f"Errors: {stats['errors']} total "
+        f"({stats['timeouts']} timeouts, "
+        f"{stats['network_errors']} network, "
+        f"{stats['parse_errors']} parsing, "
+        f"{stats['db_errors']} database)"
     )
     print("Database:", DB_PATH)
 

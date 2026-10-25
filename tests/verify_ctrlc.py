@@ -43,12 +43,9 @@ def main():
         with tempfile.TemporaryDirectory() as tmp:
             tmp = pathlib.Path(tmp)
 
-            # Fresh copy of main.py that allows the test server's port;
-            # DB_PATH anchors itself next to the copy automatically.
+            # Fresh copy of main.py; DB_PATH anchors itself next to the
+            # copy automatically, and any port is crawlable by default.
             text = (PROJECT / "main.py").read_text(encoding="utf-8")
-            text = text.replace(
-                "ALLOWED_PORTS = {80, 443}",
-                f"ALLOWED_PORTS = {{80, 443, {server.port}}}")
             script = tmp / "main.py"
             script.write_text(text, encoding="utf-8")
 

@@ -99,6 +99,10 @@ class InterruptSummaryTests(unittest.TestCase):
             "out_of_scope": 0,
             "robots_unavailable": 0,
             "errors": 0,
+            "timeouts": 0,
+            "network_errors": 0,
+            "parse_errors": 0,
+            "db_errors": 0,
             "interrupted": False,
         }
         stats.update(overrides)

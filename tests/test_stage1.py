@@ -28,8 +28,11 @@ class NormalizeUrlTests(unittest.TestCase):
     def test_out_of_range_port_returns_none(self):
         self.assertIsNone(main.normalize_url("http://example.com:99999/"))
 
-    def test_non_standard_port_rejected(self):
-        self.assertIsNone(main.normalize_url("http://example.com:8080/"))
+    def test_non_standard_port_allowed(self):
+        # Any valid port is crawlable; restricting ports is an
+        # explicit policy (ALLOWED_PORTS), not the default.
+        self.assertEqual(main.normalize_url("http://example.com:8080/a"),
+                         "http://example.com:8080/a")
 
     def test_default_http_port_stripped(self):
         self.assertEqual(main.normalize_url("http://example.com:80/a"),

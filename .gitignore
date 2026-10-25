@@ -12,6 +12,7 @@ venv/
 result.db
 result.db-shm
 result.db-wal
+wiki2k.db
 
 # Environment variables and secrets
 .env

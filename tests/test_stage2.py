@@ -71,10 +71,6 @@ class RobotsFailureRetryTests(ServerTestCase):
         b = TestServer()
         b.start()
         self.addCleanup(b.stop)
-        ports = mock.patch.object(main, "ALLOWED_PORTS",
-                                  {80, 443, a.port, b.port})
-        ports.start()
-        self.addCleanup(ports.stop)
 
         b.robots_failures = 1
         b.add_robots("User-agent: *\nAllow: /\n")

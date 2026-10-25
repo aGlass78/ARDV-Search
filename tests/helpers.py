@@ -217,12 +217,9 @@ class ServerTestCase(IsolatedDbTestCase):
         self.addCleanup(server.stop)
         self.server = server
 
-        # Crawl scope comes from the seed (http://127.0.0.1:<port>/...),
-        # so no domain patching is needed; only the ephemeral test port.
-        patcher = mock.patch.object(main, "ALLOWED_PORTS",
-                                    {80, 443, server.port})
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # Crawl scope comes from the seed (http://127.0.0.1:<port>/...)
+        # and any port is crawlable by default, so nothing needs
+        # patching for the local test server.
 
     def crawl(self, url, **kwargs):
         """Run main.crawl with output captured; returns its result."""
