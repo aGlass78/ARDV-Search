@@ -24,19 +24,29 @@ from helpers import ServerTestCase, TestServer, main, page, run_cli
 
 class AllowedHostTests(unittest.TestCase):
     def test_extra_hosts_join_seed_scope(self):
-        scope = main.get_allowed_hosts(
+        scope = main.get_scope(
             "http://quotes.toscrape.com/",
             ["books.toscrape.com", "EXAMPLE.org."]
         )
-        self.assertIn("quotes.toscrape.com", scope)
-        self.assertIn("books.toscrape.com", scope)
-        self.assertIn("example.org", scope)  # cleaned + lowercased
+        self.assertTrue(
+            main.is_allowed_url("http://quotes.toscrape.com/x", scope))
+        self.assertTrue(
+            main.is_allowed_url("http://books.toscrape.com/x", scope))
+        self.assertTrue(
+            main.is_allowed_url("http://example.org/y", scope))
 
     def test_invalid_extras_are_skipped_leniently(self):
-        scope = main.get_allowed_hosts(
-            "http://a.com/", ["", "bad/host", "x:y", "  ", "good.org"]
+        # Ports, empty strings, and whitespace are unusable; paths
+        # are valid now (host/path scoping).
+        scope = main.get_scope(
+            "http://a.com/", ["", "x:8080", "  ", "good.org", "b.org/area"]
         )
-        self.assertEqual(scope, {"a.com", "good.org"})
+        self.assertTrue(
+            main.is_allowed_url("http://good.org/z", scope))
+        self.assertTrue(
+            main.is_allowed_url("http://b.org/area/z", scope))
+        self.assertFalse(
+            main.is_allowed_url("http://b.org/other", scope))
 
     def test_cli_allowed_is_repeatable(self):
         with mock.patch.object(main, "crawl", return_value=None) as crawl:
@@ -51,8 +61,21 @@ class AllowedHostTests(unittest.TestCase):
                 ["books.toscrape.com", "blog.toscrape.com"]
             )
 
-    def test_cli_allowed_rejects_non_hostnames(self):
-        for bad in ("http://x.com", "x.com/path", "x.com:8080", ""):
+    def test_cli_allow_spelling_also_works(self):
+        with mock.patch.object(main, "crawl", return_value=None) as crawl:
+            code, _, _ = run_cli([
+                "crawl", "http://quotes.toscrape.com/",
+                "--allow", "books.toscrape.com",
+                "--allow", "example.com/page",
+            ])
+            self.assertIsNone(code)
+            self.assertEqual(
+                crawl.call_args.kwargs.get("allowed"),
+                ["books.toscrape.com", "example.com/page"]
+            )
+
+    def test_cli_allowed_rejects_unusable_entries(self):
+        for bad in ("x.com:8080", "", "ftp://x.com", "  "):
             with mock.patch.object(main, "crawl") as crawl:
                 code, _, _ = run_cli([
                     "crawl", "http://quotes.toscrape.com/",

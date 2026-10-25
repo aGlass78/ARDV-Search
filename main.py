@@ -15,7 +15,8 @@ from bs4 import BeautifulSoup
 
 
 DB_PATH = pathlib.Path(__file__).resolve().with_name("result.db")
-USER_AGENT = "StudentSearchEngine/1.0 (educational crawler)"
+USER_AGENT = ("ModelSearchEngine (educational crawler; "
+              "contact: crawler.propeller706@passinbox.com)")
 
 DEFAULT_DELAY = 0.0
 DEFAULT_MAX_BYTES = 2_000_000
@@ -60,8 +61,10 @@ Basic form:
   Seeding https://quotes.toscrape.com/ crawls quotes.toscrape.com (and
   anything under it like en.quotes.toscrape.com) but never
   books.toscrape.com or toscrape.com. To allow another site too, use
-  --allowed. To allow a whole domain family, seed the bare domain:
-  https://toscrape.com/
+  --allow; with a path it limits that site to one folder:
+  --allow example.com/page allows example.com/page/quote but not
+  example.com/page2. To allow a whole domain family, seed the bare
+  domain: https://toscrape.com/
 
   --------------------------------------------------------------------
   url                    The web address to start crawling from; the
@@ -90,10 +93,14 @@ Basic form:
                          Example:
                          python main.py crawl https://quotes.toscrape.com/ --threads 4
 
-  --allowed HOST        Also allow this extra hostname during the crawl
-                         (repeat the option to allow several sites).
+  --allow HOST[/PATH]   Also allow this extra site during the crawl
+                         (repeatable). With a path, the site is limited
+                         to that folder and everything below it:
+                         --allow example.com/page allows
+                         example.com/page/quote but not example.com/page2.
                          Example:
-                         python main.py crawl https://quotes.toscrape.com/ --allowed books.toscrape.com
+                         python main.py crawl https://quotes.toscrape.com/ --allow books.toscrape.com
+                         (the old spelling --allowed still works)
   Press Ctrl+C during a crawl to stop early: queued work is
   cancelled, requests already in flight are finished, everything
   indexed so far is saved, and the statistics are still printed.
@@ -135,7 +142,8 @@ SEARCH Command
                         run the command from).
 
   USER_AGENT             How the crawler introduces itself to servers:
-                        "StudentSearchEngine/1.0 (educational crawler)".
+                        "ModelSearchEngine (educational crawler;
+                        contact: crawler.propeller706@passinbox.com)".
 
   DEFAULT_DELAY          0.0 seconds — the wait used when --delay is
                         omitted.
@@ -290,26 +298,58 @@ def normalize_url(url):
     ))
 
 
-def get_allowed_hosts(seed_url, extra=()):
-    """Build the crawl scope: the seed's hostname and subdomains, plus
-    any extra hostnames (e.g. from --allowed).
+def parse_scope_entry(entry):
+    """Parse one allowed entry: 'host' or 'host/path' (scheme tolerated).
 
-    Extra values are cleaned leniently; unusable ones are skipped so
-    library callers never crash on a bad string.
+    Returns a (host, path_prefix) rule, or None when the entry is
+    unusable. A bare host allows that host and all its subdomains
+    anywhere on the site. A host/path entry limits the host to that
+    path subtree: 'example.com/page' allows example.com/page/quote but
+    not example.com/page2 (the prefix must end at a '/' boundary).
+    """
+    if not entry:
+        return None
+
+    entry = str(entry).strip().lower()
+
+    if "://" in entry:
+        scheme, _, entry = entry.partition("://")
+        if scheme not in ("http", "https"):
+            return None
+
+    host, slash, path = entry.partition("/")
+    host = host.strip().rstrip(".")
+
+    if not host or ":" in host or any(c.isspace() for c in host):
+        return None
+
+    path = path.strip("/") if slash else ""
+    prefix = f"/{path}" if path else ""
+
+    return host, prefix
+
+
+def get_scope(seed_url, extra=()):
+    """Build the crawl scope: the seed's host plus extra --allow entries.
+
+    The seed contributes its whole host (all subdomains, all paths);
+    each extra entry contributes one rule per parse_scope_entry.
+    Invalid extras are skipped leniently so library callers never
+    crash on a bad string.
     """
     hostname = urlparse(seed_url).hostname
 
     if not hostname:
-        return set()
+        return ()
 
-    hosts = {hostname.lower()}
+    scope = [(hostname.lower(), "")]
 
-    for host in extra:
-        cleaned = (host or "").strip().lower().rstrip(".")
-        if cleaned and "/" not in cleaned and ":" not in cleaned:
-            hosts.add(cleaned)
+    for entry in extra:
+        rule = parse_scope_entry(entry)
+        if rule is not None:
+            scope.append(rule)
 
-    return hosts
+    return tuple(scope)
 
 
 def host_of(url):
@@ -322,13 +362,27 @@ def host_of(url):
     return (urlparse(url).hostname or "").lower()
 
 
-def is_allowed_host(url, allowed_hosts):
-    hostname = (urlparse(url).hostname or "").lower()
+def is_allowed_url(url, scope):
+    """True when the URL matches any scope rule.
 
-    return any(
-        hostname == host or hostname.endswith("." + host)
-        for host in allowed_hosts
-    )
+    A rule (host, prefix) matches when the URL's host is that host or
+    a subdomain of it and, when the rule carries a path prefix, the
+    URL's path equals the prefix or continues below it
+    ('/page' matches '/page' and '/page/quote' but not '/page2').
+    """
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").lower()
+    path = parsed.path or "/"
+
+    for host, prefix in scope:
+        if not (hostname == host or hostname.endswith("." + host)):
+            continue
+
+        if (not prefix or path == prefix
+                or path.startswith(prefix + "/")):
+            return True
+
+    return False
 
 
 class RobotsCache:
@@ -434,7 +488,7 @@ def parse_retry_after(value):
         return None
 
 
-def fetch_html(session, url, max_bytes, allowed_hosts=None,
+def fetch_html(session, url, max_bytes, scope=None,
                limiter=None):
     """Download a bounded HTML response, following redirects manually.
 
@@ -480,9 +534,9 @@ def fetch_html(session, url, max_bytes, allowed_hosts=None,
             )
 
             if not next_url or (
-                    allowed_hosts is not None
-                    and not is_allowed_host(
-                        next_url, allowed_hosts)):
+                    scope is not None
+                    and not is_allowed_url(
+                        next_url, scope)):
                 return None, None, None
 
             current = next_url
@@ -550,7 +604,7 @@ def get_session():
 
 def process_url(
     url,
-    allowed_hosts,
+    scope,
     max_bytes,
     limiter,
     robots_cache,
@@ -568,7 +622,7 @@ def process_url(
         "message": None,
     }
 
-    if not is_allowed_host(url, allowed_hosts):
+    if not is_allowed_url(url, scope):
         result["status"] = "out_of_scope"
         return result
 
@@ -601,7 +655,7 @@ def process_url(
         # fetch_html paces every hop itself (scope is checked before
         # any redirect is followed).
         response, html, final_url = fetch_html(
-            session, url, max_bytes, allowed_hosts, limiter
+            session, url, max_bytes, scope, limiter
         )
 
         if final_url is None:
@@ -664,7 +718,7 @@ def process_url(
             if not next_url:
                 continue
 
-            if not is_allowed_host(next_url, allowed_hosts):
+            if not is_allowed_url(next_url, scope):
                 continue
 
             if urlparse(next_url).path.lower().endswith(
@@ -730,14 +784,15 @@ def crawl(
     """Crawl concurrently; max_pages=None means unlimited.
 
     The crawl is scoped to the seed's hostname and its subdomains,
-    plus any extra hosts named in `allowed` (the --allowed option).
+    plus any extra `--allow` entries (bare hosts, or host/path
+    prefixes that limit a site to one subtree).
     """
     start_url = normalize_url(start_url)
-    allowed_hosts = (
-        get_allowed_hosts(start_url, allowed) if start_url else set()
+    scope = (
+        get_scope(start_url, allowed) if start_url else ()
     )
 
-    if not start_url or not allowed_hosts:
+    if not start_url or not scope:
         print("Start URL is not a valid, crawlable http(s) URL.")
         return None
 
@@ -818,14 +873,14 @@ def crawl(
 
                 visited.add(url)
 
-                if not is_allowed_host(url, allowed_hosts):
+                if not is_allowed_url(url, scope):
                     stats["out_of_scope"] += 1
                     continue
 
                 future = executor.submit(
                     process_url,
                     url,
-                    allowed_hosts,
+                    scope,
                     max_bytes,
                     limiter,
                     robots_cache,
@@ -1205,13 +1260,15 @@ def main():
         help="number of concurrent worker threads (default: 8)"
     )
     crawl_parser.add_argument(
+        "--allow",
         "--allowed",
         action="append",
         default=[],
-        metavar="HOST",
-        help="extra hostname to allow in addition to the seed's host "
-             "and its subdomains (repeatable, e.g. --allowed "
-             "books.toscrape.com)"
+        metavar="HOST[/PATH]",
+        help="extra site to allow in addition to the seed's host and "
+             "its subdomains; with a path, the site is limited to that "
+             "folder (repeatable, e.g. --allow books.toscrape.com or "
+             "--allow example.com/page)"
     )
 
     search_parser = commands.add_parser("search")
@@ -1242,18 +1299,16 @@ def main():
         if args.threads < 1:
             parser.error("--threads must be at least 1")
 
-        extra_hosts = []
+        extra_entries = []
 
-        for host in args.allowed:
-            cleaned = host.strip().lower().rstrip(".")
-
-            if not cleaned or "/" in cleaned or ":" in cleaned:
+        for entry in args.allow:
+            if parse_scope_entry(entry) is None:
                 parser.error(
-                    "--allowed expects bare hostnames (no scheme, "
-                    f"path, or port), got {host!r}"
+                    "--allow expects 'host' or 'host/path' entries "
+                    f"(no ports or spaces), got {entry!r}"
                 )
 
-            extra_hosts.append(cleaned)
+            extra_entries.append(entry)
 
         stats = crawl(
             args.url,
@@ -1261,7 +1316,7 @@ def main():
             delay=args.delay,
             max_bytes=args.max_bytes,
             threads=args.threads,
-            allowed=extra_hosts,
+            allowed=extra_entries,
         )
 
         if stats:

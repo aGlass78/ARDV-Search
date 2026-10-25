@@ -19,8 +19,8 @@ class ScopeDerivationTests(unittest.TestCase):
     QUOTES_SEED = "http://quotes.toscrape.com/"
 
     def allowed(self, url):
-        return main.is_allowed_host(
-            url, main.get_allowed_hosts(self.QUOTES_SEED))
+        return main.is_allowed_url(
+            url, main.get_scope(self.QUOTES_SEED))
 
     def test_seed_host_in_scope(self):
         self.assertTrue(self.allowed("http://quotes.toscrape.com/page/1/"))
@@ -46,20 +46,23 @@ class ScopeDerivationTests(unittest.TestCase):
 
     def test_port_is_not_part_of_scope(self):
         # A seed on a non-standard port still scopes by hostname only.
-        scope = main.get_allowed_hosts("http://quotes.toscrape.com:8443/")
-        self.assertTrue(main.is_allowed_host("http://quotes.toscrape.com/", scope))
+        scope = main.get_scope("http://quotes.toscrape.com:8443/")
+        self.assertTrue(
+            main.is_allowed_url("http://quotes.toscrape.com/", scope))
 
     def test_invalid_seed_has_no_scope(self):
-        self.assertEqual(main.get_allowed_hosts("not a url"), set())
+        self.assertEqual(main.get_scope("not a url"), ())
 
     def test_bare_domain_seed_allows_all_subdomains(self):
         # Seeding the bare domain is the documented way to allow
         # every subdomain at once.
-        scope = main.get_allowed_hosts("http://toscrape.com/")
-        self.assertTrue(main.is_allowed_host("http://toscrape.com/", scope))
-        self.assertTrue(main.is_allowed_host("http://quotes.toscrape.com/", scope))
-        self.assertTrue(main.is_allowed_host("http://books.toscrape.com/", scope))
-        self.assertFalse(main.is_allowed_host("http://toscrape.org/", scope))
+        scope = main.get_scope("http://toscrape.com/")
+        self.assertTrue(main.is_allowed_url("http://toscrape.com/", scope))
+        self.assertTrue(
+            main.is_allowed_url("http://quotes.toscrape.com/", scope))
+        self.assertTrue(
+            main.is_allowed_url("http://books.toscrape.com/", scope))
+        self.assertFalse(main.is_allowed_url("http://toscrape.org/", scope))
 
 
 class CrawlScopeTests(ServerTestCase):

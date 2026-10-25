@@ -58,6 +58,7 @@ class TestServer:
     def __init__(self):
         self.routes = {}
         self.requests = []       # (monotonic timestamp, path) per GET
+        self.user_agents = []    # User-Agent header per GET
         self.robots_failures = 0  # respond 503 to the next N robots.txt hits
         self.slow = {}           # path -> seconds to sleep before answering
         self._lock = threading.Lock()
@@ -120,6 +121,8 @@ class TestServer:
                 path = urlparse(self.path).path
                 with server._lock:
                     server.requests.append((time.monotonic(), path))
+                    server.user_agents.append(
+                        self.headers.get("User-Agent"))
                     fail_robots = (path == "/robots.txt"
                                    and server.robots_failures > 0)
                     if fail_robots:
