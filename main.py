@@ -15,8 +15,7 @@ from bs4 import BeautifulSoup
 
 
 DB_PATH = pathlib.Path(__file__).resolve().with_name("result.db")
-USER_AGENT = ("ModelSearchEngine (educational crawler; "
-              "contact: crawler.propeller706@passinbox.com)")
+ENV_PATH = pathlib.Path(__file__).resolve().with_name(".env")
 
 DEFAULT_DELAY = 0.0
 DEFAULT_MAX_BYTES = 2_000_000
@@ -33,6 +32,62 @@ SKIP_EXTENSIONS = (
     ".zip", ".mp4", ".mp3", ".css", ".js", ".ico",
     ".svg", ".woff", ".woff2"
 )
+
+
+def load_env_value(key, env_path=None):
+    """Read KEY=VALUE from a .env file - no dependencies needed.
+
+    Returns the last definition of `key`, or None when the file is
+    missing/unreadable or the key is absent or empty. Only simple
+    KEY=value lines are understood; blank lines and # comments are
+    ignored, and surrounding whitespace and quotes are stripped.
+    """
+    if env_path is None:
+        env_path = ENV_PATH
+
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+
+    value = None
+
+    for line in lines:
+        line = line.strip()
+
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        found_key, _, found_value = line.partition("=")
+
+        if found_key.strip() != key:
+            continue
+
+        found_value = found_value.strip().strip("'\"")
+        value = found_value or None
+
+    return value
+
+
+def build_user_agent(contact_email):
+    """Assemble the User-Agent; the contact section is optional.
+
+    An empty or whitespace-only email (e.g. .env missing, or
+    CONTACT_EMAIL left blank) simply drops the contact section.
+    """
+    contact_email = (contact_email or "").strip()
+
+    if not contact_email:
+        return "ModelSearchEngine (educational crawler)"
+
+    return (f"ModelSearchEngine (educational crawler; "
+            f"contact: {contact_email})")
+
+
+# The contact address is not hardcoded: it comes from .env (next to
+# main.py) so every checkout can use its own. Missing .env or an
+# empty CONTACT_EMAIL falls back to the no-contact agent above.
+USER_AGENT = build_user_agent(load_env_value("CONTACT_EMAIL"))
 
 
 HELP_TEXT = r"""WHAT THIS PROGRAM DOES
@@ -142,8 +197,11 @@ SEARCH Command
                         run the command from).
 
   USER_AGENT             How the crawler introduces itself to servers:
-                        "ModelSearchEngine (educational crawler;
-                        contact: crawler.propeller706@passinbox.com)".
+                        "ModelSearchEngine (educational crawler)", plus
+                        "; contact: <address>" when CONTACT_EMAIL is
+                        set in a .env file next to main.py. A missing
+                        .env or an empty value simply drops the contact
+                        section.
 
   DEFAULT_DELAY          0.0 seconds — the wait used when --delay is
                         omitted.

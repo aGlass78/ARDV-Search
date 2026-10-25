@@ -1,0 +1,30 @@
+# Python files
+__pycache__/
+*.py[cod]
+Scripts/
+Lib/
+
+# Virtual environments
+.venv/
+venv/
+
+# Local crawler database and SQLite files
+result.db
+result.db-shm
+result.db-wal
+
+# Environment variables and secrets
+.env
+.env.*
+
+# Editor and operating system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+PROJECT.md
+param.txt
+pyvenv.cfg
+CACHEDIR.TAG
+.lock

@@ -8,7 +8,8 @@
 2. The CLI flag is --allow (with --allowed still accepted); entries
    are 'host' or 'host/path', optionally with an http(s):// scheme.
 3. The crawler identifies itself as "ModelSearchEngine (educational
-   crawler; contact: crawler.propeller706@passinbox.com)".
+   crawler)" plus an optional contact section; since Stage 9 the
+   contact email is read from .env (see test_stage9 for that).
 """
 import unittest
 from unittest import mock
@@ -115,14 +116,18 @@ class PathPrefixCrawlTests(ServerTestCase):
 
 
 class UserAgentTests(unittest.TestCase):
-    def test_user_agent_constant(self):
-        self.assertEqual(
-            main.USER_AGENT,
-            "ModelSearchEngine (educational crawler; "
-            "contact: crawler.propeller706@passinbox.com)")
+    def test_user_agent_is_a_valid_form(self):
+        # With a configured .env the agent carries a contact section;
+        # without one it is the bare base string. Either way, no
+        # address may be hardcoded into the module.
+        self.assertTrue(
+            main.USER_AGENT == "ModelSearchEngine (educational crawler)"
+            or main.USER_AGENT.startswith(
+                "ModelSearchEngine (educational crawler; contact: ")
+        )
 
     def test_user_agent_sent_by_default_session(self):
-        # get_session() headers carry the new agent for workers.
+        # get_session() headers carry the agent for workers.
         session = main.get_session()
         try:
             self.assertEqual(

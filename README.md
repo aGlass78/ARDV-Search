@@ -23,10 +23,6 @@ services, no API keys, no data leaving your machine.
   prefix matching (`cat` also finds `cats`), and query-syntax injection is impossible.
 - **Crash-safe storage** — WAL mode with full durability; a crash loses at most one
   small batch of pages and never corrupts the index.
-- **Graceful Ctrl+C** — interrupt any crawl and still get the full statistics summary,
-  with everything indexed so far safely saved.
-- **Built-in help** — `python main.py --h` prints the complete guide (examples for
-  every argument, plus the hardcoded values).
 
 ## Requirements
 
@@ -37,8 +33,8 @@ services, no API keys, no data leaving your machine.
 ## Setup
 
 ```bash
-git clone <your-repo-url>
-cd SE   # or whatever you named the folder
+git clone https://github.com/aGlass78/ARDV-Search
+cd "path/to/repo" #The path to the copied repo
 
 # virtual environment (optional but recommended)
 python -m venv .venv
@@ -47,17 +43,29 @@ source .venv/bin/activate        # Linux / macOS
 
 # install dependencies
 python -m pip install -r requirements.txt
-# or, if you use uv:
-uv pip install -r requirements.txt
 ```
+
+### Contact email (optional)
+
+The crawler's User-Agent header tells servers who is crawling. To include your own
+contact address, create a `.env` file next to `main.py` with one line:
+
+```env
+CONTACT_EMAIL=you@example.com
+```
+
+This is entirely optional — if `.env` is missing, unreadable, or `CONTACT_EMAIL` is
+left empty, the crawler simply identifies itself as `ModelSearchEngine (educational
+crawler)` with no contact section. No setup step is required and nothing errors out.
+`.env` is in `.gitignore`, so your address stays local to your checkout.
 
 ## Usage
 
-Crawl a site, then search it:
+Crawl a site, then search it (Example 'https://quotes.toscrape.com'):
 
 ```bash
 python main.py crawl https://quotes.toscrape.com/
-python main.py search "quote about life"
+python main.py search "life"
 ```
 
 Example crawl summary:
@@ -76,11 +84,11 @@ Database: ...\SE\result.db
 Example search result:
 
 ```
-Results for: quote about life
+Results for: life
 
 1. Quotes to Scrape
    URL: https://quotes.toscrape.com/
-    [quote] about [life] with ...
+     quote about [life] with ...
 ```
 
 ### Common recipes
@@ -168,9 +176,9 @@ tests/             unit tests, CLI smoke test, Ctrl+C verification script
 ## Notes
 
 - This is an educational crawler. It identifies itself to servers as
-  `ModelSearchEngine (educational crawler; contact: crawler.propeller706@passinbox.com)`
-  and obeys robots.txt — please use it respectfully and in line with the terms of the
-  sites you crawl.
+  `ModelSearchEngine (educational crawler)` — plus a contact address if you configure
+  one (see [Contact email](#contact-email-optional)) — and obeys robots.txt. Please use
+  it respectfully and in line with the terms of the sites you crawl.
 - The index (`result.db`) is created on first crawl and reused afterwards; re-crawling
   a page updates it rather than duplicating it. Searching before any crawl prints a
   friendly "No database found" message instead of failing.
