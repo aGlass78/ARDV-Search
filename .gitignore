@@ -1,6 +1,9 @@
 # Python files
 __pycache__/
 *.py[cod]
+CACHEDIR.TAG
+.lock
+pyvenv.cfg
 Scripts/
 Lib/
 
@@ -12,7 +15,7 @@ venv/
 result.db
 result.db-shm
 result.db-wal
-wiki2k.db
+*.db
 
 # Environment variables and secrets
 .env
@@ -24,8 +27,7 @@ wiki2k.db
 .DS_Store
 Thumbs.db
 
+# Project files
 PROJECT.md
 param.txt
-pyvenv.cfg
-CACHEDIR.TAG
-.lock
+*.log

@@ -28,7 +28,7 @@ services, no API keys, no data leaving your machine.
 
 ## Requirements
 
-- Python 3.10+ (developed and tested on 3.14)
+- [Python 3.10+](https://www.python.org/) (developed and tested on 3.14)
 - SQLite with FTS5 (bundled with Python's standard `sqlite3` module)
 - `requests` and `beautifulsoup4` — pinned in [`requirements.txt`](requirements.txt)
 
@@ -40,8 +40,10 @@ cd "path/to/repo" #The path to the copied repo
 
 # virtual environment (optional but recommended)
 python -m venv .venv
-source .venv/bin/activate        # Linux / macOS
-.venv\Scripts\activate          # Windows
+# On Linux / macOS
+source .venv/bin/activate  
+# On Windows      
+.venv\Scripts\activate          
 
 # install dependencies
 python -m pip install -r requirements.txt
@@ -79,7 +81,7 @@ Worker threads: 8
 Fetch attempts: 3, links discovered: 2, queue left: 0
 Skipped: 0 robots-blocked, 0 HTTP errors, 0 rate-limited (0 retried),
         0 non-HTML, 0 too-large, 0 empty, 0 duplicates, 0 out-of-scope
-Database: ...\SE\result.db
+Database: ...\.venv\result.db
 ```
 
 Example search result:
@@ -122,11 +124,11 @@ python main.py search "interesting topic" --limit 25
 | Option | Default | Description |
 |---|---|---|
 | `url` | — | Seed URL; the crawl is scoped to its hostname + subdomains |
-| `--max-pages N` | unlimited | Stop after N pages have been indexed |
+| `--max-pages N` |  default is unlimited | Stop after N pages have been indexed |
 | `--delay SECONDS` | `0.0` | Minimum seconds between requests to one host (robots.txt Crawl-delay and Retry-After always apply on top) |
 | `--max-bytes N` | `2,000,000` | Skip pages whose download exceeds N bytes |
 | `--threads N` | `8` | Number of concurrent worker threads |
-| `--allow HOST[/PATH]` | none | Extra site to allow, optionally limited to a path folder (repeatable; `--allowed` also works) |
+| `--allow HOST[/PATH]` | none | Extra site to allow (repeatable to allow more sites) |
 
 **`python main.py search <query> [options]`**
 
@@ -135,7 +137,7 @@ python main.py search "interesting topic" --limit 25
 | `query` | — | Words to find (all words required; falls back to any-word; prefix-matched) |
 | `--limit N` | `10` | Maximum number of results (any positive number) |
 
-**`python main.py --h`** — print the full built-in guide and exit.
+**`python main.py --h`** — prints the guide
 
 ## How It Works
 
@@ -151,7 +153,7 @@ python main.py search "interesting topic" --limit 25
   independent of the directory you run from. WAL mode lets searches run while a crawl
   is writing.
 
-## Running the Tests
+## Running the Tests (Running or not running tests doesnt effect app functionality; skip if not interested.)
 
 131 tests run on the standard library's `unittest` against a local HTTP server —
 **no external network access is needed**:
