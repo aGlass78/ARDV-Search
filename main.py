@@ -328,7 +328,41 @@ def get_database():
 
 
 def normalize_url(url):
-    """Return a canonical HTTP(S) URL or None."""
+    """Return the canonical form of an HTTP(S) URL, or None if unusable.
+
+    Canonicalization is what makes URL-based deduplication work: two
+    spellings of the same page collapse to one string, so the crawl
+    frontier ('queued'/'visited') and the database upsert both treat
+    them as a single URL, and rows already stored are merged by
+    deduplicate_database().
+
+    The rules (equivalent spellings map to the same canonical URL):
+
+        example.com/page#section == example.com/page   (fragments are
+                                                        never sent)
+        EXAMPLE.com/page         == example.com/page   (host lowercase;
+                                                        a trailing dot
+                                                        is also dropped:
+                                                        example.com. ==
+                                                        example.com)
+        https://example.com:443/page == https://example.com/page
+                                                       (scheme-default
+                                                        ports stripped)
+        example.com/page/        == example.com/page   (trailing slashes
+                                                        stripped; the
+                                                        root "/" stays)
+
+    while distinct resources stay distinct:
+
+        example.com/page?id=1  != example.com/page?id=2 (queries kept)
+        https://example.com/p  != http://example.com/p  (schemes kept)
+        example.com/page1      != example.com/page2     (paths kept,
+                                                         case-sensitive)
+
+    Unusable URLs return None: unsupported schemes, userinfo
+    (@user:pass), malformed or out-of-range ports, and (when the
+    optional ALLOWED_PORTS policy is set) disallowed ports.
+    """
     if not url:
         return None
 
@@ -341,7 +375,9 @@ def normalize_url(url):
     if parsed.username or parsed.password:
         return None
 
-    hostname = parsed.hostname
+    # .hostname is already lowercase; a trailing dot is the FQDN form
+    # of the same host (example.com. == example.com).
+    hostname = (parsed.hostname or "").rstrip(".")
     if not hostname:
         return None
 
@@ -360,12 +396,74 @@ def normalize_url(url):
 
     host_part = f"[{hostname}]" if ":" in hostname else hostname
     netloc = host_part if port is None else f"{host_part}:{port}"
-    path = parsed.path or "/"
+
+    # "" and "/page/" and "/page" are one page; keep the bare root as
+    # "/" so every canonical URL still has a path.
+    path = (parsed.path or "/").rstrip("/") or "/"
 
     return urlunparse((
         parsed.scheme, netloc, path,
         parsed.params, parsed.query, "",
     ))
+
+
+def deduplicate_database(conn):
+    """Merge stored rows whose URLs canonicalize to the same page.
+
+    The database is keyed by URL, so a crawl must never hold two rows
+    for one page just because they were stored with different
+    spellings (".../page" and ".../page/"). This walks the stored
+    URLs through normalize_url() and, for every group of equivalent
+    URLs, keeps exactly one row: a row already stored in canonical
+    form is preferred, otherwise the first-seen row survives and is
+    relabeled to the canonical spelling. Genuinely different URLs
+    (?id=1 vs ?id=2, http vs https, page1 vs page2) are untouched.
+
+    Returns the number of duplicate rows removed.
+    """
+    rows = conn.execute("SELECT rowid, url FROM pages").fetchall()
+
+    keep = {}          # canonical url -> (rowid, already canonical?)
+    removed = 0
+
+    for rowid, url in rows:
+        canonical = normalize_url(url)
+
+        if canonical is None:
+            # Legacy non-HTTP row: leave it alone.
+            continue
+
+        if canonical not in keep:
+            keep[canonical] = (rowid, url == canonical)
+            continue
+
+        kept_rowid, kept_is_canonical = keep[canonical]
+
+        if url == canonical and not kept_is_canonical:
+            # Prefer the row that already has the canonical spelling.
+            conn.execute(
+                "DELETE FROM pages WHERE rowid = ?", (kept_rowid,))
+            keep[canonical] = (rowid, True)
+        else:
+            conn.execute(
+                "DELETE FROM pages WHERE rowid = ?", (rowid,))
+
+        removed += 1
+
+    # Relabel survivors so a later crawl's upsert finds them.
+    changed = removed
+
+    for canonical, (rowid, is_canonical) in keep.items():
+        if not is_canonical:
+            conn.execute(
+                "UPDATE pages SET url = ? WHERE rowid = ?",
+                (canonical, rowid))
+            changed += 1
+
+    if changed:
+        conn.commit()
+
+    return removed
 
 
 def parse_scope_entry(entry):
@@ -628,15 +726,20 @@ def fetch_html(session, url, max_bytes, scope=None,
             response.close()
             response = None
 
-            next_url = (
-                normalize_url(urljoin(current, location))
-                if location else None
-            )
+            raw_next = urljoin(current, location) if location else None
 
-            if not next_url or (
-                    scope is not None
-                    and not is_allowed_url(
-                        next_url, scope)):
+            if not raw_next:
+                return None, None, None, "out_of_scope"
+
+            # Check scope and robots against the canonical (normalized)
+            # form, but follow the exact Location for the next hop:
+            # some servers 308 to a canonical trailing slash, and if we
+            # stripped it the next hop would land on the same URL again
+            # and the chain would loop until MAX_REDIRECTS.
+            next_url = normalize_url(raw_next)
+
+            if scope is not None and not is_allowed_url(
+                    next_url, scope):
                 return None, None, None, "out_of_scope"
 
             # Verify the destination's robots rules before following
@@ -659,7 +762,10 @@ def fetch_html(session, url, max_bytes, scope=None,
                 if not robots.can_fetch(USER_AGENT, next_url):
                     return None, None, None, "robots_blocked"
 
-            current = next_url
+            # Follow the exact Location (keeping any canonical trailing
+            # slash) so the server does not redirect again; robots and
+            # scope checks above already used the normalized form.
+            current = raw_next
         else:
             # Still redirecting after MAX_REDIRECTS hops.
             return None, None, None, "out_of_scope"
@@ -831,7 +937,7 @@ def process_url(
             )
             return result
 
-        result["final_url"] = final_url
+        result["final_url"] = normalize_url(final_url)
 
         if "text/html" not in response.headers.get(
             "Content-Type", ""
@@ -986,6 +1092,22 @@ def crawl(
     }
 
     conn = get_database()
+
+    merged = 0
+
+    try:
+        merged = deduplicate_database(conn)
+    except sqlite3.Error as error:
+        stats["db_errors"] += 1
+        stats["errors"] += 1
+        print(f"Database error during deduplication: {error}")
+
+    if merged:
+        print(
+            f"Deduplicated {merged} stored URL(s) that canonicalize "
+            "to the same page."
+        )
+
     limiter = RateLimiter(delay)
 
     queue = deque([start_url])

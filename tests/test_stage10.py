@@ -309,10 +309,62 @@ class SplitErrorCounterTests(ServerTestCase):
                                return_value=FailingConn()):
             stats = self._crawl_one()
 
-        self.assertEqual(stats["db_errors"], 1)
+        # Two separate DB failures are counted: the crawl-start
+        # deduplication pass and the page insert both hit the failing
+        # connection.
+        self.assertEqual(stats["db_errors"], 2)
         self.assertEqual(stats["indexed"], 0)
-        self.assertEqual(stats["errors"], 1)
+        self.assertEqual(stats["errors"], 2)
         self.assertIn("Database error", self.stdout)
+
+
+class TrailingSlashRedirectTests(ServerTestCase):
+    """Sites that 308 to a canonical trailing slash must not loop:
+
+    /page/2 -> 308 Location: http://…/page/2/  -> 200
+    The old code normalized the redirect target, stripping the slash,
+    so the next hop was the same URL again -> infinite loop until
+    MAX_REDIRECTS, misreported as "out_of_scope (or looped)".
+    """
+
+    def _setup_loop(self, status=308):
+        s = self.server
+        s.add_robots("User-agent: *\nAllow: /\n")
+        s.add("/seed", page("Seed", "seed text", ["/page/2"]))
+        # The server redirects the slash-less form to the slash form.
+        s.add("/page/2", redirect=f"{s.url('/page/2')}/",
+              status=status)
+        s.add("/page/2/", page("Page 2", "second page"))
+        return s
+
+    def test_308_slash_redirect_does_not_loop(self):
+        s = self._setup_loop(status=308)
+        stats = self.crawl(s.url("/seed"), max_pages=10, delay=0.02,
+                           threads=1)
+        self.assertEqual(self.indexed_paths(),
+                         ["/page/2", "/seed"])
+        self.assertIn("/page/2/", s.paths())   # slash form fetched
+        self.assertEqual(stats["out_of_scope"], 0)
+
+    def test_302_slash_redirect_does_not_loop(self):
+        s = self._setup_loop(status=302)
+        stats = self.crawl(s.url("/seed"), max_pages=10, delay=0.02,
+                           threads=1)
+        self.assertEqual(self.indexed_paths(),
+                         ["/page/2", "/seed"])
+        self.assertEqual(stats["out_of_scope"], 0)
+
+    def test_out_of_scope_redirect_target_still_rejected(self):
+        # The raw-target follow must not weaken the scope guard.
+        s = self.server
+        s.add_robots("User-agent: *\nAllow: /\n")
+        s.add("/seed", page("Seed", "seed text", ["/in"]))
+        s.add("/in", redirect="http://example.com/out", status=302)
+        stats = self.crawl(s.url("/seed"), max_pages=10, delay=0.02,
+                           threads=1)
+        self.assertEqual(self.indexed_paths(), ["/seed"])
+        self.assertNotIn("/out", s.paths())
+        self.assertEqual(stats["out_of_scope"], 1)
 
 
 if __name__ == "__main__":
