@@ -124,7 +124,7 @@ python main.py search "interesting topic" --limit 25
 | Option | Default | Description |
 |---|---|---|
 | `url` | — | Seed URL; the crawl is scoped to its hostname + subdomains |
-| `--max-pages N` |  default is unlimited | Stop after N pages have been indexed |
+| `--max-pages N` |  unlimited | Stop after N pages have been indexed |
 | `--delay SECONDS` | `0.0` | Minimum seconds between requests to one host (robots.txt Crawl-delay and Retry-After always apply on top) |
 | `--max-bytes N` | `2,000,000` | Skip pages whose download exceeds N bytes |
 | `--threads N` | `8` | Number of concurrent worker threads |
@@ -136,20 +136,23 @@ python main.py search "interesting topic" --limit 25
 |---|---|---|
 | `query` | — | Words to find (all words required; falls back to any-word; prefix-matched) |
 | `--limit N` | `10` | Maximum number of results (any positive number) |
+| `--e` | Disabled / Basic search functionality | Searches for the exact phrase without stemming |
+| `--es` | Disabled / Basic search functionality | Searches for the exact phrase with stemming |
 
+**Stemming:** Treats variations of the word as the same word; 'Bomb' would be treated same as 'Bombing'                                 
 **`python main.py --h`** — prints the guide
 
 ## How It Works
 
 - **Crawl:** a breadth-first frontier feeds a thread pool. Each page is checked against
   robots.txt, downloaded with a size cap, parsed for links (which are scoped and queued
-  even if the page itself cannot be indexed), and its text is upserted into the index —
+  even if the page itself cannot be indexed), and its text is upserted into the index,
   batched and crash-safe. Redirects are followed manually with scope checks before every
   hop and a 10-hop limit.
-- **Search:** queries are reduced to plain words (letters/digits only — FTS5 syntax
+- **Search:** queries are reduced to plain words (letters/digits only, FTS5 syntax
   cannot be injected), matched with AND semantics and prefix expansion, falling back to
   OR when AND finds nothing, and ranked by BM25 with title/description weighting.
-- **Storage:** a single SQLite file, `result.db`, created next to `main.py` —
+- **Storage:** a single SQLite file, `result.db`, created next to `main.py`,
   independent of the directory you run from. WAL mode lets searches run while a crawl
   is writing.
 
@@ -176,8 +179,9 @@ tests/             unit tests, CLI smoke test, Ctrl+C verification script
 ## Notes
 
 - This is an educational crawler. It identifies itself to servers as
-  `ModelSearchEngine (educational crawler)` — plus a contact address if you configure
-  one (see [Contact email](#contact-email-optional)) — and obeys robots.txt. Please use
+  `ModelSearchEngine (educational crawler)` plus a contact address if you configure
+  one (see [Contact email](#contact-email-optional)) and obeys robots.txt. Please use
   it respectfully and in line with the terms of the sites you crawl.
 - The index (`result.db`) is created on first crawl and reused afterwards; re-crawling
   a page updates it rather than duplicating it. 
+- The default search functionality (Without --e or --es) splits phrases into words and searches those words, for proper phrase searches use --e or --es refer [Command ref.](#command-reference) for description.

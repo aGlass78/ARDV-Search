@@ -191,6 +191,19 @@ SEARCH Command
   --limit N              Show at most N results (any positive number).
                          Example:
                          python main.py search "famous quote" --limit 20
+
+  --e                   Exact phrase search: all your words must appear
+                         together, in order (no prefix matching, no
+                         stemming). "google bomb" finds "google bomb
+                         controversy" but not "google bombing", "bomb
+                         google", or "google controversial bomb".
+                         Example:
+                         python main.py search "google bomb" --e
+
+  --es                  Stemming: word endings are ignored, so a search
+                         for "google bomb" also finds "google bombing".
+                         Example:
+                         python main.py search "google bomb" --es
   --------------------------------------------------------------------
 
 
@@ -1451,16 +1464,195 @@ def print_crawl_summary(stats):
     print("Database:", DB_PATH)
 
 
+def _porter_stem(word):
+    """Return the Porter stem of a lowercase word (pure Python).
+
+    A faithful implementation of the classic Porter stemming algorithm
+    (M.F. Porter, 1980), used to give --es queries their stemming
+    behaviour without adding a third-party dependency. Words of two
+    letters or fewer are returned unchanged.
+    """
+    if len(word) <= 2:
+        return word
+
+    vowels = set("aeiou")
+
+    def is_consonant(w, i):
+        ch = w[i]
+        if ch in vowels:
+            return False
+        if ch == "y":
+            return True if i == 0 else not is_consonant(w, i - 1)
+        return True
+
+    def measure(w):
+        """m = number of vowel-consonant sequences (Porter's m)."""
+        m = 0
+        i = 0
+        n = len(w)
+        while i < n:
+            if is_consonant(w, i):
+                i += 1
+                continue
+            while i < n and not is_consonant(w, i):
+                i += 1
+            j = i
+            while j < n and is_consonant(w, j):
+                j += 1
+            if j > i:
+                m += 1
+                i = j
+        return m
+
+    def has_vowel(w):
+        return any(not is_consonant(w, i) for i in range(len(w)))
+
+    def double_consonant(w):
+        return (len(w) >= 2
+                and is_consonant(w, -1)
+                and w[-1] == w[-2])
+
+    def cvc(w):
+        """Ends CVC where the final C is not w, x, or y."""
+        if len(w) < 3:
+            return False
+        if not is_consonant(w, -1) or is_consonant(w, -2):
+            return False
+        if not is_consonant(w, -3) or w[-1] in "wxy":
+            return False
+        return True
+
+    def step1a(w):
+        if w.endswith("sses"):
+            return w[:-4] + "ss"
+        if w.endswith("ies"):
+            return w[:-3] + "i"
+        if w.endswith("ss"):
+            return w
+        if w.endswith("s"):
+            return w[:-1]
+        return w
+
+    def step1b(w):
+        flag = False
+        if w.endswith("eed"):
+            if measure(w[:-3]) > 0:
+                return w[:-3] + "ee"
+            return w
+        if w.endswith("ed"):
+            stem = w[:-2]
+            if has_vowel(stem):
+                w, flag = stem, True
+        elif w.endswith("ing"):
+            stem = w[:-3]
+            if has_vowel(stem):
+                w, flag = stem, True
+        if flag:
+            if w.endswith(("at", "bl", "iz")):
+                return w + "e"
+            if double_consonant(w) and w[-1] not in "lsz":
+                return w[:-1]
+            if measure(w) == 1 and cvc(w):
+                return w + "e"
+        return w
+
+    def step1c(w):
+        if w.endswith("y") and len(w) > 1 and is_consonant(w, -2):
+            return w[:-1] + "i"
+        return w
+
+    def step2(w):
+        replacements = (
+            ("ational", "ate"), ("tional", "tion"), ("enci", "ence"),
+            ("anci", "ance"), ("izer", "ize"), ("abli", "able"),
+            ("alli", "al"), ("entli", "ent"), ("eli", "e"),
+            ("ousli", "ous"), ("ization", "ate"), ("ation", "ate"),
+            ("ator", "ate"), ("alism", "al"), ("iveness", "ive"),
+            ("fulness", "ful"), ("ousness", "ous"), ("aliti", "al"),
+            ("iviti", "ive"), ("biliti", "ble"), ("logi", "log"),
+        )
+        for suffix, rep in replacements:
+            if w.endswith(suffix):
+                stem = w[:-len(suffix)]
+                if measure(stem) > 0:
+                    return stem + rep
+                return w
+        return w
+
+    def step3(w):
+        replacements = (
+            ("icate", "ic"), ("ative", ""), ("alize", "al"),
+            ("iciti", "ic"), ("ical", "ic"), ("ful", ""),
+            ("ness", ""),
+        )
+        for suffix, rep in replacements:
+            if w.endswith(suffix):
+                stem = w[:-len(suffix)]
+                if measure(stem) > 0:
+                    return stem + rep
+                return w
+        return w
+
+    def step4(w):
+        suffixes = (
+            "al", "ance", "ence", "er", "ic", "able", "ible",
+            "ant", "ement", "ment", "ent", "ion", "ou", "ism",
+            "ate", "iti", "ous", "ive", "ize",
+        )
+        for suffix in suffixes:
+            if w.endswith(suffix):
+                stem = w[:-len(suffix)]
+                if measure(stem) > 1:
+                    if suffix == "ion" and stem[-1:] not in ("s", "t"):
+                        return w
+                    return stem
+                return w
+        return w
+
+    def step5(w):
+        if w.endswith("e"):
+            stem = w[:-1]
+            m = measure(stem)
+            if m > 1 or (m == 1 and not cvc(stem)):
+                return stem
+            return w
+        if double_consonant(w) and w[-1] == "l" and measure(w) > 1:
+            return w[:-1]
+        return w
+
+    return step5(step4(step3(step2(step1c(step1b(step1a(word)))))))
+
+
 def extract_words(query):
     """Split a query into safe FTS5 search terms."""
     return re.findall(r"[^\W_]+", query, flags=re.UNICODE)
 
 
-def build_match(words, operator="AND"):
-    """Build an FTS5 prefix-match expression."""
+def build_match(words, operator="AND", stem=False):
+    """Build an FTS5 prefix-match expression.
+
+    With stem=True each word is Porter-stemmed first, so a search for
+    "google bomb" also matches "google bombing" (stemmed prefixes
+    against the un-stemmed index).
+    """
+    if stem:
+        terms = (_porter_stem(word) for word in words)
+    else:
+        terms = words
     return f" {operator} ".join(
-        f'"{word}"*' for word in words
+        f'"{term}"*' for term in terms
     )
+
+
+def build_exact_match(words):
+    """Build an FTS5 exact-phrase expression.
+
+    '"google bomb"' matches pages containing those tokens consecutively
+    and in order ("google bomb controversy"), not reordered ("bomb
+    google"), interrupted ("google controversial bomb"), or inflected
+    ("google bombing"). No prefix expansion, no stemming.
+    """
+    return '"' + " ".join(words) + '"'
 
 
 def _fts_query(conn, match, limit):
@@ -1481,11 +1673,15 @@ def _fts_query(conn, match, limit):
     ).fetchall()
 
 
-def run_search(query, limit=10):
+def run_search(query, limit=10, exact=False, stem=False):
     """Return up to limit search results.
 
-    Returns [] when the database file does not exist; searching never
-    creates the database as a side effect.
+    exact (--e) searches for the whole query as one exact phrase -
+    tokens in order, no prefix expansion, no stemming, and no OR
+    fallback. stem (--es) Porter-stems each word so inflected forms
+    match ("google bomb" finds "google bombing"). Returns [] when the
+    database file does not exist; searching never creates the database
+    as a side effect.
     """
     words = extract_words(query)
 
@@ -1498,9 +1694,18 @@ def run_search(query, limit=10):
     conn = get_database()
 
     try:
+        if exact:
+            # Exact phrase: strict, no fallback. A reordered or
+            # interrupted word sequence must not match.
+            return _fts_query(
+                conn,
+                build_exact_match(words),
+                limit
+            )
+
         rows = _fts_query(
             conn,
-            build_match(words, "AND"),
+            build_match(words, "AND", stem),
             limit
         )
 
@@ -1508,7 +1713,7 @@ def run_search(query, limit=10):
         if not rows:
             rows = _fts_query(
                 conn,
-                build_match(words, "OR"),
+                build_match(words, "OR", stem),
                 limit
             )
 
@@ -1520,7 +1725,7 @@ def run_search(query, limit=10):
         conn.close()
 
 
-def search(query, limit=10):
+def search(query, limit=10, exact=False, stem=False):
     """Search the index and print results."""
     if not extract_words(query):
         print("Enter a search term.")
@@ -1532,13 +1737,14 @@ def search(query, limit=10):
         print("Run a crawl first, e.g.: python main.py crawl <url>")
         return
 
-    rows = run_search(query, limit)
+    rows = run_search(query, limit, exact, stem)
 
     if not rows:
         print("No results found.")
         return
 
-    print(f"\nResults for: {query}\n")
+    mode = " (exact phrase)" if exact else " (stemmed)" if stem else ""
+    print(f"\nResults for: {query}{mode}\n")
 
     for number, (url, title, description, excerpt) in enumerate(
         rows, start=1
@@ -1605,6 +1811,18 @@ def main():
     search_parser = commands.add_parser("search")
     search_parser.add_argument("query")
     search_parser.add_argument("--limit", type=int, default=10)
+    search_parser.add_argument(
+        "--e",
+        action="store_true",
+        help="match the exact phrase: all words in order, no prefix "
+             "expansion, no stemming"
+    )
+    search_parser.add_argument(
+        "--es",
+        action="store_true",
+        help="enable stemming, e.g. 'google bombing' matches a search "
+             "for 'google bomb'"
+    )
 
     args = parser.parse_args()
 
@@ -1657,7 +1875,10 @@ def main():
         if args.limit < 1:
             parser.error("--limit must be a positive integer")
 
-        search(args.query, args.limit)
+        if args.e and args.es:
+            parser.error("--e and --es are mutually exclusive")
+
+        search(args.query, args.limit, args.e, args.es)
 
 
 if __name__ == "__main__":
