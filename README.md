@@ -185,3 +185,4 @@ tests/             unit tests, CLI smoke test, Ctrl+C verification script
 - The index (`result.db`) is created on first crawl and reused afterwards; re-crawling
   a page updates it rather than duplicating it. 
 - The default search functionality (Without --e or --es) splits phrases into words and searches those words, for proper phrase searches use --e or --es refer [Command ref.](#command-reference) for description.
+- The [releases](https://github.com/aGlass78/ARDV-Search/releases) section includes a pre-indexed database of 15k wikipedia pages available to download and use directly without having to crawl first. To use download the `wiki15k.db` file, place it in your copied repo, and rename it to `result.db` then run the search function and it will search that file.
