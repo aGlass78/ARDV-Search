@@ -360,14 +360,22 @@ def normalize_url(url):
                                                          case-sensitive)
 
     Unusable URLs return None: unsupported schemes, userinfo
-    (@user:pass), malformed or out-of-range ports, and (when the
-    optional ALLOWED_PORTS policy is set) disallowed ports.
+    (@user:pass), malformed URLs (e.g. unmatched IPv6 brackets) or
+    out-of-range ports, and (when the optional ALLOWED_PORTS policy is
+    set) disallowed ports.
     """
-    if not url:
+    if not isinstance(url, str) or not url:
         return None
 
-    url, _ = urldefrag(url)
-    parsed = urlparse(url)
+    try:
+        url, _ = urldefrag(url)
+        parsed = urlparse(url)
+    except (ValueError, TypeError):
+        # Malformed URLs (e.g. unmatched IPv6 brackets like
+        # "http://[::1") raise inside urldefrag()/urlparse(); fail
+        # closed and treat them as unusable instead of crashing the
+        # caller.
+        return None
 
     if parsed.scheme not in ("http", "https"):
         return None
@@ -561,6 +569,9 @@ def is_allowed_url(url, scope):
     URL's path equals the prefix or continues below it
     ('/page' matches '/page' and '/page/quote' but not '/page2').
     """
+    if not url:
+        return False
+
     parsed = urlparse(url)
     hostname = (parsed.hostname or "").lower()
     path = parsed.path or "/"
@@ -711,12 +722,19 @@ def fetch_html(session, url, max_bytes, scope=None,
             if limiter is not None:
                 limiter.wait(host_of(current))
 
-            response = session.get(
-                current,
-                timeout=REQUEST_TIMEOUT,
-                allow_redirects=False,
-                stream=True
-            )
+            try:
+                response = session.get(
+                    current,
+                    timeout=REQUEST_TIMEOUT,
+                    allow_redirects=False,
+                    stream=True
+                )
+            except (ValueError, TypeError):
+                # requests still resolves redirects even with
+                # allow_redirects=False (it validates the Location via
+                # urlparse), so a malformed Location (e.g. unmatched
+                # IPv6 brackets) raises here. Abandon the chain safely.
+                return None, None, None, "out_of_scope"
 
             if response.status_code not in (
                     301, 302, 303, 307, 308):
@@ -726,28 +744,42 @@ def fetch_html(session, url, max_bytes, scope=None,
             response.close()
             response = None
 
-            raw_next = urljoin(current, location) if location else None
+            try:
+                raw_next = (
+                    urljoin(current, location) if location else None
+                )
+            except (ValueError, TypeError):
+                # A malformed Location (e.g. unmatched IPv6 brackets)
+                # can make urljoin raise; abandon the chain safely.
+                raw_next = None
 
             if not raw_next:
                 return None, None, None, "out_of_scope"
 
-            # Check scope and robots against the canonical (normalized)
-            # form, but follow the exact Location for the next hop:
-            # some servers 308 to a canonical trailing slash, and if we
-            # stripped it the next hop would land on the same URL again
-            # and the chain would loop until MAX_REDIRECTS.
+            # Check scope against the canonical (normalized) form, but
+            # follow the exact Location for the next hop: some servers
+            # 308 to a canonical trailing slash, and if we stripped it
+            # the next hop would land on the same URL again and the
+            # chain would loop until MAX_REDIRECTS. A target that
+            # cannot be normalized (None) is out of scope.
             next_url = normalize_url(raw_next)
 
-            if scope is not None and not is_allowed_url(
-                    next_url, scope):
+            if not next_url or (
+                    scope is not None
+                    and not is_allowed_url(
+                        next_url, scope)):
                 return None, None, None, "out_of_scope"
 
             # Verify the destination's robots rules before following
             # the hop - never fetch a target we may not crawl. The
-            # cache makes this cheap for same-origin chains.
+            # cache makes this cheap for same-origin chains. Rules are
+            # checked against the EXACT URL we will fetch (raw_next):
+            # /private and /private/ are distinct paths under robots.txt
+            # (e.g. with "$" exact-match rules), so checking the
+            # normalized form would evaluate the wrong path.
             if robots_cache is not None:
                 robots = robots_cache.rules_for(
-                    session, next_url, limiter)
+                    session, raw_next, limiter)
 
                 if robots is None:
                     return (None, None, None,
@@ -757,14 +789,14 @@ def fetch_html(session, url, max_bytes, scope=None,
 
                 if crawl_delay and limiter is not None:
                     limiter.set_min_delay(
-                        host_of(next_url), crawl_delay)
+                        host_of(raw_next), crawl_delay)
 
-                if not robots.can_fetch(USER_AGENT, next_url):
+                if not robots.can_fetch(USER_AGENT, raw_next):
                     return None, None, None, "robots_blocked"
 
             # Follow the exact Location (keeping any canonical trailing
-            # slash) so the server does not redirect again; robots and
-            # scope checks above already used the normalized form.
+            # slash) so the server does not redirect again; the scope
+            # check used the normalized form, robots the exact URL.
             current = raw_next
         else:
             # Still redirecting after MAX_REDIRECTS hops.
