@@ -262,9 +262,12 @@ class RedirectScopeTests(ServerTestCase):
                            threads=1)
 
         # Abandoned after MAX_REDIRECTS hops, never an infinite loop.
+        # Sitemap probes (SITEMAP_COMMON_PATHS 404s) are excluded.
         self.assertEqual(stats["out_of_scope"], 1)
         self.assertEqual(self.indexed_paths(), ["/seed"])
-        self.assertLessEqual(len(s.paths()), 2 + main.MAX_REDIRECTS + 2)
+        paths = [p for p in s.paths()
+                 if p not in main.SITEMAP_COMMON_PATHS]
+        self.assertLessEqual(len(paths), 2 + main.MAX_REDIRECTS + 2)
 
 
 class CommitCountingConn:

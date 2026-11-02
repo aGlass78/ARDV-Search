@@ -135,8 +135,10 @@ class PacingTests(ServerTestCase):
 
         self.crawl(s.url("/seed"), max_pages=10, delay=0.15)
 
-        paths = s.paths()
+        paths = [p for p in s.paths()
+                 if p not in main.SITEMAP_COMMON_PATHS]
         # 7 requests: robots.txt + 6 pages (all of them get fetched).
+        # Sitemap probes (SITEMAP_COMMON_PATHS 404s) are excluded.
         self.assertEqual(len(paths), 7)
         gaps = s.gaps()
         self.assertGreaterEqual(min(gaps), 0.10,

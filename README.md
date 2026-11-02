@@ -6,7 +6,7 @@ a local SQLite database, and lets you search them from the command line — no e
 services, no API keys, no data leaving your machine.
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-131%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-214%20passing-brightgreen)
 
 ## Key Features
 
@@ -129,6 +129,8 @@ python main.py search "interesting topic" --limit 25
 | `--max-bytes N` | `2,000,000` | Skip pages whose download exceeds N bytes |
 | `--threads N` | `8` | Number of concurrent worker threads |
 | `--allow HOST[/PATH]` | none | Extra site to allow (repeatable to allow more sites) |
+| `--no-sitemap` | off / html + sitemap based discovery | Skip sitemap discovery entirely (robots.txt `Sitemap:` declaration + common-location probes); just crawl HTML links |
+| `--only-sitemap` | off / html + sitemap based discovery | Crawl only from sitemap URLs (no HTML link discovery); aborts with a message if no sitemap is found |
 
 **`python main.py search <query> [options]`**
 
@@ -144,11 +146,15 @@ python main.py search "interesting topic" --limit 25
 
 ## How It Works
 
-- **Crawl:** a breadth-first frontier feeds a thread pool. Each page is checked against
-  robots.txt, downloaded with a size cap, parsed for links (which are scoped and queued
-  even if the page itself cannot be indexed), and its text is upserted into the index,
-  batched and crash-safe. Redirects are followed manually with scope checks before every
-  hop and a 10-hop limit.
+- **Crawl:** a breadth-first frontier feeds a thread pool. Before HTML discovery,
+  sitemaps are seeded: a robots.txt `Sitemap:` declaration is honored, and if none
+  exists `/sitemap.xml` (etc.) are probed; `<urlset>`/`<sitemapindex>` XML is
+  parsed (namespace-tolerant, recursive) and its URLs are normalized, scope-checked,
+  and queued. Each page is then checked against robots.txt, downloaded with a size
+  cap, parsed for links (which are scoped and queued even if the page itself cannot
+  be indexed), and its text is upserted into the index, batched and crash-safe.
+  Redirects are followed manually with scope checks before every hop and a 10-hop
+  limit.
 - **Search:** queries are reduced to plain words (letters/digits only, FTS5 syntax
   cannot be injected), matched with AND semantics and prefix expansion, falling back to
   OR when AND finds nothing, and ranked by BM25 with title/description weighting.
@@ -158,11 +164,11 @@ python main.py search "interesting topic" --limit 25
 
 ## Running the Tests (Running or not running tests doesnt effect app functionality; skip if not interested.)
 
-131 tests run on the standard library's `unittest` against a local HTTP server —
+214 tests run on the standard library's `unittest` against a local HTTP server —
 **no external network access is needed**:
 
 ```bash
-python -m unittest discover -s tests -v   # full suite (~40s)
+python -m unittest discover -s tests -v   # full suite (~72s)
 
 python tests/smoke_cli.py                  # end-to-end CLI crawl + search check
 python tests/verify_ctrlc.py              # real-signal Ctrl+C verification

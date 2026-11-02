@@ -4,6 +4,7 @@ import re
 import sqlite3
 import time
 import threading
+import xml.etree.ElementTree as ET
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from email.utils import parsedate_to_datetime
@@ -23,6 +24,16 @@ DEFAULT_THREADS = 8
 MAX_REDIRECTS = 10
 DB_COMMIT_BATCH = 25
 ROBOTS_RETRY_SECONDS = 300.0
+
+# Sitemap discovery: probed (in order) when robots.txt declares no
+# Sitemap lines. <urlset> and <sitemapindex> XML are both supported.
+SITEMAP_COMMON_PATHS = (
+    "/sitemap.xml",
+    "/sitemap_index.xml",
+    "/sitemap-index.xml",
+    "/wp-sitemap.xml",
+)
+MAX_SITEMAP_DEPTH = 5
 
 # Optional, explicit port policy. None (the default) means any valid
 # port may be crawled; set to a set of ints, e.g. {80, 443}, to
@@ -164,6 +175,28 @@ Basic form:
                          Example:
                          python main.py crawl https://quotes.toscrape.com/ --allow books.toscrape.com
                          (the old spelling --allowed still works)
+
+  By default the crawler also feeds the crawl from sitemaps. It first
+  checks the site's robots.txt for a Sitemap declaration, then probes
+  the common locations (/sitemap.xml, /sitemap_index.xml,
+  /sitemap-index.xml, /wp-sitemap.xml). Both <urlset> and
+  <sitemapindex> XML sitemaps are supported (namespaced too); index
+  documents are followed recursively. Page URLs found are normalized,
+  checked against the crawl scope, and seeded into the queue before
+  HTML link discovery begins. If no sitemap is found the crawl simply
+  continues with HTML discovery.
+
+  --no-sitemap          Skip sitemap discovery entirely; discover
+                         pages only by following HTML links.
+                         Example:
+                         python main.py crawl https://quotes.toscrape.com/ --no-sitemap
+
+  --only-sitemap        Crawl only the page URLs listed in the site's
+                         sitemaps; pages are indexed but their links
+                         are NOT followed. Aborts when no sitemap is
+                         found.
+                         Example:
+                         python main.py crawl https://quotes.toscrape.com/ --only-sitemap
   Press Ctrl+C during a crawl to stop early: queued work is
   cancelled, requests already in flight are finished, everything
   indexed so far is saved, and the statistics are still printed.
@@ -257,6 +290,14 @@ SEARCH Command
 
   SKIP_EXTENSIONS        Files like .pdf, .jpg, .zip, .mp4, .css are
                         never downloaded or indexed.
+
+  SITEMAP_COMMON_PATHS   /sitemap.xml, /sitemap_index.xml,
+                         /sitemap-index.xml, /wp-sitemap.xml — these
+                         are probed when robots.txt declares no
+                         Sitemap lines.
+
+  MAX_SITEMAP_DEPTH      5 — how deep <sitemapindex> trees are
+                         followed (guards against cycles/runaway).
 """
 
 
@@ -615,6 +656,7 @@ class RobotsCache:
     def __init__(self):
         self._rules = {}
         self._failures = {}
+        self._raw = {}
         self._lock = threading.Lock()
 
     def rules_for(self, session, url, limiter=None):
@@ -673,15 +715,210 @@ class RobotsCache:
             self._note_failure(origin)
             return None
 
+        raw = response.text if response.status_code == 200 else ""
+
         with self._lock:
             self._rules[origin] = rules
+            self._raw[origin] = raw
             self._failures.pop(origin, None)
 
         return rules
 
+    def sitemaps(self, session, url, limiter=None):
+        """Return Sitemap URLs declared in robots.txt for url's origin.
+
+        An empty list means robots.txt declared none (or could not be
+        verified); callers then fall back to the common sitemap
+        locations. Reuses the same per-origin robots cache as
+        rules_for, so discovery never fetches robots.txt twice.
+        """
+        origin = origin_of(url)
+
+        with self._lock:
+            raw = self._raw.get(origin)
+
+        if raw is None:
+            rules = self.rules_for(session, url, limiter)
+
+            if rules is None:
+                return []
+
+            if limiter is not None:
+                crawl_delay = rules.crawl_delay(USER_AGENT)
+
+                if crawl_delay is not None:
+                    limiter.set_min_delay(host_of(url), crawl_delay)
+
+            with self._lock:
+                raw = self._raw.get(origin, "")
+
+        declared = []
+
+        for line in raw.splitlines():
+            line = line.strip()
+
+            if line.lower().startswith("sitemap:"):
+                value = line[8:].strip()
+
+                if value:
+                    declared.append(value)
+
+        return declared
+
     def _note_failure(self, origin):
         with self._lock:
             self._failures[origin] = time.monotonic()
+
+
+def parse_sitemap_xml(data):
+    """Parse sitemap XML bytes -> (kind, locs) or None.
+
+    kind is "urlset" (page URLs) or "sitemapindex" (child sitemap
+    URLs); locs are the <loc> element texts in document order. Both
+    plain and namespaced sitemaps are accepted ({*} matches any
+    namespace). Returns None when data is not well-formed sitemap XML.
+    """
+    if not data:
+        return None
+
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError:
+        return None
+
+    tag = root.tag
+
+    if tag.endswith("}urlset") or tag == "urlset":
+        kind = "urlset"
+    elif tag.endswith("}sitemapindex") or tag == "sitemapindex":
+        kind = "sitemapindex"
+    else:
+        return None
+
+    locs = [
+        el.text.strip()
+        for el in root.findall(".//{*}loc")
+        if el.text and el.text.strip()
+    ]
+
+    return kind, locs
+
+
+def fetch_sitemap(session, url, limiter, max_bytes=DEFAULT_MAX_BYTES):
+    """Download one sitemap document; return its bytes, or None."""
+    limiter.wait(host_of(url))
+
+    try:
+        response = session.get(url, timeout=REQUEST_TIMEOUT, stream=True)
+    except requests.RequestException:
+        return None
+
+    try:
+        if response.status_code != 200:
+            return None
+
+        chunks = []
+        total = 0
+
+        try:
+            for chunk in response.iter_content(chunk_size=65536):
+                chunks.append(chunk)
+                total += len(chunk)
+
+                if total > max_bytes:
+                    return None
+        except requests.RequestException:
+            return None
+
+        return b"".join(chunks)
+    finally:
+        response.close()
+
+
+def collect_sitemap_urls(session, sitemap_url, scope, limiter, depth,
+                         seen, page_urls, sources):
+    """Fetch one sitemap document and recurse through index children.
+
+    Populates `page_urls` (normalized, scope-filtered page URLs) and
+    `sources` (every sitemap document successfully parsed). `seen`
+    guards against cycles; `depth` bounds recursion. Out-of-scope
+    sitemap documents (declared on other hosts) are skipped, keeping
+    the crawler inside its allowed scope.
+    """
+    if depth > MAX_SITEMAP_DEPTH or sitemap_url in seen:
+        return
+
+    seen.add(sitemap_url)
+
+    data = fetch_sitemap(session, sitemap_url, limiter)
+    parsed = parse_sitemap_xml(data) if data else None
+
+    if parsed is None:
+        return
+
+    kind, locs = parsed
+    sources.append(sitemap_url)
+
+    if kind == "urlset":
+        for loc in locs:
+            child = normalize_url(urljoin(sitemap_url, loc))
+
+            if child and is_allowed_url(child, scope):
+                page_urls.add(child)
+    else:  # sitemapindex
+        for loc in locs:
+            child = normalize_url(urljoin(sitemap_url, loc))
+
+            if child and is_allowed_url(child, scope):
+                collect_sitemap_urls(
+                    session, child, scope, limiter,
+                    depth + 1, seen, page_urls, sources
+                )
+
+
+def discover_sitemaps(session, seed_url, scope, limiter, robots_cache):
+    """Discover the seed site's sitemaps; return (page_urls, sources).
+
+    Order of discovery: robots.txt Sitemap declarations first; when
+    robots.txt declares none, probe the common locations
+    (SITEMAP_COMMON_PATHS). Both <urlset> and <sitemapindex> documents
+    are parsed; index children are fetched recursively (bounded).
+    Returned page URLs are normalized and filtered to the crawl scope.
+    `sources` lists every sitemap document successfully parsed.
+    """
+    parsed = urlparse(seed_url)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+
+    declared = (
+        robots_cache.sitemaps(session, seed_url, limiter)
+        if robots_cache else []
+    )
+    candidates = [
+        normalize_url(urljoin(seed_url, u))
+        for u in declared
+    ]
+    candidates = [u for u in candidates if u]
+
+    if not candidates:
+        candidates = [base + p for p in SITEMAP_COMMON_PATHS]
+
+    seen = set()
+    page_urls = set()
+    sources = []
+
+    for candidate in candidates:
+        if not is_allowed_url(candidate, scope):
+            continue
+
+        collect_sitemap_urls(
+            session, candidate, scope, limiter, 0,
+            seen, page_urls, sources
+        )
+
+        if sources:
+            break
+
+    return sorted(page_urls), sources
 
 
 def parse_retry_after(value):
@@ -1075,12 +1312,18 @@ def crawl(
     max_bytes=DEFAULT_MAX_BYTES,
     threads=DEFAULT_THREADS,
     allowed=(),
+    sitemap="auto",
 ):
     """Crawl concurrently; max_pages=None means unlimited.
 
     The crawl is scoped to the seed's hostname and its subdomains,
     plus any extra `--allow` entries (bare hosts, or host/path
     prefixes that limit a site to one subtree).
+
+    `sitemap` selects discovery behavior: "auto" (default) seeds the
+    queue from the site's sitemap when one exists, "skip" ignores
+    sitemaps entirely, and "only" crawls sitemap URLs without
+    following page links (aborting when no sitemap exists).
     """
     start_url = normalize_url(start_url)
     scope = (
@@ -1107,6 +1350,10 @@ def crawl(
         print("threads must be at least 1.")
         return None
 
+    if sitemap not in ("auto", "skip", "only"):
+        print("sitemap must be 'auto', 'skip', or 'only'.")
+        return None
+
     started = time.perf_counter()
 
     stats = {
@@ -1129,6 +1376,8 @@ def crawl(
         "not_indexable": 0,
         "out_of_scope": 0,
         "duplicates": 0,
+        "sitemaps_found": 0,
+        "sitemap_urls": 0,
         "interrupted": False,
         "delay": delay,
         "threads": threads,
@@ -1154,13 +1403,70 @@ def crawl(
         )
 
     limiter = RateLimiter(delay)
+    robots_cache = RobotsCache()
 
+    # ---- Sitemap discovery (skipped by --no-sitemap) ----
+    sitemap_urls = []
+    sitemap_sources = []
+
+    if sitemap != "skip":
+        # Use a short-lived local session for discovery so the
+        # main-thread session is not polluted (and threads don't leak a
+        # stale User-Agent into later searches/tests). Closed as soon as
+        # discovery is done; per-worker sessions are used for fetching.
+        discovery_session = requests.Session()
+        discovery_session.headers.update({"User-Agent": USER_AGENT})
+
+        try:
+            sitemap_urls, sitemap_sources = discover_sitemaps(
+                discovery_session, start_url, scope, limiter, robots_cache
+            )
+        finally:
+            discovery_session.close()
+
+        stats["sitemaps_found"] = len(sitemap_sources)
+        stats["sitemap_urls"] = len(sitemap_urls)
+
+    visited = set()
+    rate_limit_retried = set()
+    follow_links = True
     queue = deque([start_url])
     queued = {start_url}
-    visited = set()
 
-    robots_cache = RobotsCache()
-    rate_limit_retried = set()
+    if sitemap == "only":
+        if not sitemap_urls:
+            print(
+                f"No sitemap found for {host_of(start_url)}; "
+                "aborting crawl (--only-sitemap)."
+            )
+            queue = deque()
+            queued = set()
+        else:
+            queue = deque(sitemap_urls)
+            queued = set(sitemap_urls)
+            follow_links = False
+            print("Found sitemap(s): " + ", ".join(sitemap_sources))
+            print(
+                f"Seeding {len(sitemap_urls)} URL(s) from "
+                "sitemap(s); HTML link discovery disabled."
+            )
+    elif sitemap == "auto":
+        if sitemap_urls:
+            for url in sitemap_urls:
+                if url not in queued:
+                    queued.add(url)
+                    queue.append(url)
+
+            print("Found sitemap(s): " + ", ".join(sitemap_sources))
+            print(
+                f"Seeding {len(sitemap_urls)} URL(s) from "
+                "sitemap(s)."
+            )
+        else:
+            print(
+                f"No sitemap found for {host_of(start_url)}; "
+                "continuing with HTML-based discovery."
+            )
 
     saved = 0
     pending_commits = 0
@@ -1313,13 +1619,15 @@ def crawl(
                     visited.add(final_url)
                     queued.add(final_url)
 
-                # Queue links even when a page cannot be indexed.
+                # Queue links even when a page cannot be indexed
+                # (unless --only-sitemap disabled link discovery).
                 new_links = []
 
-                for next_url in result["links"]:
-                    if next_url not in queued:
-                        queued.add(next_url)
-                        new_links.append(next_url)
+                if follow_links:
+                    for next_url in result["links"]:
+                        if next_url not in queued:
+                            queued.add(next_url)
+                            new_links.append(next_url)
 
                 queue.extend(new_links)
                 stats["links_discovered"] += len(new_links)
@@ -1453,6 +1761,10 @@ def print_crawl_summary(stats):
     )
     print(
         f"Robots unavailable: {stats['robots_unavailable']}"
+    )
+    print(
+        f"Sitemaps found: {stats.get('sitemaps_found', 0)}, "
+        f"URLs seeded from sitemaps: {stats.get('sitemap_urls', 0)}"
     )
     print(
         f"Errors: {stats['errors']} total "
@@ -1807,6 +2119,17 @@ def main():
              "folder (repeatable, e.g. --allow books.toscrape.com or "
              "--allow example.com/page)"
     )
+    crawl_parser.add_argument(
+        "--no-sitemap",
+        action="store_true",
+        help="skip sitemap discovery; discover pages via HTML links only"
+    )
+    crawl_parser.add_argument(
+        "--only-sitemap",
+        action="store_true",
+        help="crawl only URLs from sitemaps; do not follow page links "
+             "(aborts if no sitemap is found)"
+    )
 
     search_parser = commands.add_parser("search")
     search_parser.add_argument("query")
@@ -1848,6 +2171,18 @@ def main():
         if args.threads < 1:
             parser.error("--threads must be at least 1")
 
+        if args.no_sitemap and args.only_sitemap:
+            parser.error(
+                "--no-sitemap and --only-sitemap are mutually exclusive"
+            )
+
+        sitemap_mode = "auto"
+
+        if args.no_sitemap:
+            sitemap_mode = "skip"
+        elif args.only_sitemap:
+            sitemap_mode = "only"
+
         extra_entries = []
 
         for entry in args.allow:
@@ -1866,6 +2201,7 @@ def main():
             max_bytes=args.max_bytes,
             threads=args.threads,
             allowed=extra_entries,
+            sitemap=sitemap_mode,
         )
 
         if stats:
