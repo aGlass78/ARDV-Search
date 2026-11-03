@@ -6,25 +6,26 @@ a local SQLite database, and lets you search them from the command line — no e
 services, no API keys, no data leaving your machine.
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-214%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-215%20passing-brightgreen)
 
 ## Key Features
 
-- **Scoped, general-purpose crawling** — the crawl stays on the seed's hostname and its
+- **Scoped, general-purpose crawling** - the crawl stays on the seed's hostname and its
   subdomains. `--allow` adds extra sites, and can even limit a site to a single folder:
   `--allow example.com/page` matches `example.com/page/quote` but never `example.com/page2`.
-- **Politeness built in** — robots.txt is always respected (including `Crawl-delay`),
+- **Politeness built in** - robots.txt is always respected (including `Crawl-delay`),
   HTTP `Retry-After` is honored with a temporary pause plus one automatic retry, requests
   are paced per host, and every redirect target is scope- and robots-checked *before* it
   is fetched. Timeouts, network, parsing, and database errors are counted separately in
   the crawl summary.
-- **Fast and multithreaded** — configurable worker pool (`--threads`), streamed downloads
+- **Fast and multithreaded** - configurable worker pool (`--threads`), streamed downloads
   with a per-page size cap, and batched database commits.
-- **Quality search ranking** — SQLite FTS5 with BM25, weighting title matches 5x and
+- **Quality search ranking** - SQLite FTS5 with BM25, weighting title matches 5x and
   description matches 3x over body text. AND queries with automatic OR fallback,
   prefix matching (`cat` also finds `cats`), and query-syntax injection is impossible.
-- **Crash-safe storage** — WAL mode with full durability; a crash loses at most one
+- **Crash-safe storage** - WAL mode with full durability; a crash loses at most one
   small batch of pages and never corrupts the index.
+- **Sitemap based crawling** - supports sitemap parsing and adding urls to queue with only sitemap and no sitemap scrawl options
 
 ## Requirements
 
@@ -141,20 +142,20 @@ python main.py search "interesting topic" --limit 25
 | `--e` | Disabled / Basic search functionality | Searches for the exact phrase without stemming |
 | `--es` | Disabled / Basic search functionality | Searches for the exact phrase with stemming |
 
-**Stemming:** Treats variations of the word as the same word; 'Bomb' would be treated same as 'Bombing'                                 
+**Stemming:** Treats variations of the word as the same word; 'Bomb' would be treated same as 'Bombing'. Works by splitting the word into its base + a tense or any addition.                            
 **`python main.py --h`** — prints the guide
 
 ## How It Works
 
 - **Crawl:** a breadth-first frontier feeds a thread pool. Before HTML discovery,
-  sitemaps are seeded: a robots.txt `Sitemap:` declaration is honored, and if none
-  exists `/sitemap.xml` (etc.) are probed; `<urlset>`/`<sitemapindex>` XML is
-  parsed (namespace-tolerant, recursive) and its URLs are normalized, scope-checked,
-  and queued. Each page is then checked against robots.txt, downloaded with a size
-  cap, parsed for links (which are scoped and queued even if the page itself cannot
-  be indexed), and its text is upserted into the index, batched and crash-safe.
-  Redirects are followed manually with scope checks before every hop and a 10-hop
-  limit.
+  sitemaps are seeded: a robots.txt `Sitemap:` declaration is honored (every
+  declared line is parsed), and if none exists `/sitemap.xml` (etc.) are probed;
+  `<urlset>`/`<sitemapindex>` XML is parsed (namespace-tolerant, recursive) and
+  its URLs are normalized, scope-checked, and queued. Each page is then checked
+  against robots.txt, downloaded with a size cap, parsed for links (which are
+  scoped and queued even if the page itself cannot be indexed), and its text is
+  upserted into the index, batched and crash-safe. Redirects are followed manually
+  with scope checks before every hop and a 10-hop limit.
 - **Search:** queries are reduced to plain words (letters/digits only, FTS5 syntax
   cannot be injected), matched with AND semantics and prefix expansion, falling back to
   OR when AND finds nothing, and ranked by BM25 with title/description weighting.
@@ -164,7 +165,7 @@ python main.py search "interesting topic" --limit 25
 
 ## Running the Tests (Running or not running tests doesnt effect app functionality; skip if not interested.)
 
-214 tests run on the standard library's `unittest` against a local HTTP server —
+215 tests run on the standard library's `unittest` against a local HTTP server —
 **no external network access is needed**:
 
 ```bash
@@ -192,3 +193,8 @@ tests/             unit tests, CLI smoke test, Ctrl+C verification script
   a page updates it rather than duplicating it. 
 - The default search functionality (Without --e or --es) splits phrases into words and searches those words, for proper phrase searches use --e or --es refer [Command ref.](#command-reference) for description.
 - The [releases](https://github.com/aGlass78/ARDV-Search/releases) section includes a pre-indexed database of 15k wikipedia pages available to download and use directly without having to crawl first. To use download the `wiki15k.db` file, place it in your copied repo, and rename it to `result.db` then run the search function and it will search that file.
+
+## Known limitations / Future features
+
+- Currently the crawler cant parse compressed sitemaps (.xml.gz files)
+- **Stemming Limitations** - The implemented porter algorithm for stemming can create issues like splitting the word studies into studi and es which is incorrect.

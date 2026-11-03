@@ -881,10 +881,13 @@ def discover_sitemaps(session, seed_url, scope, limiter, robots_cache):
 
     Order of discovery: robots.txt Sitemap declarations first; when
     robots.txt declares none, probe the common locations
-    (SITEMAP_COMMON_PATHS). Both <urlset> and <sitemapindex> documents
-    are parsed; index children are fetched recursively (bounded).
-    Returned page URLs are normalized and filtered to the crawl scope.
-    `sources` lists every sitemap document successfully parsed.
+    (SITEMAP_COMMON_PATHS). Every declared Sitemap line is honored and
+    parsed — the first success does not hide the rest — while the
+    common-location fallback stops at the first success. Both
+    <urlset> and <sitemapindex> documents are parsed; index children
+    are fetched recursively (bounded). Returned page URLs are
+    normalized and filtered to the crawl scope. `sources` lists every
+    sitemap document successfully parsed.
     """
     parsed = urlparse(seed_url)
     base = f"{parsed.scheme}://{parsed.netloc}"
@@ -893,30 +896,32 @@ def discover_sitemaps(session, seed_url, scope, limiter, robots_cache):
         robots_cache.sitemaps(session, seed_url, limiter)
         if robots_cache else []
     )
-    candidates = [
-        normalize_url(urljoin(seed_url, u))
-        for u in declared
-    ]
-    candidates = [u for u in candidates if u]
-
-    if not candidates:
-        candidates = [base + p for p in SITEMAP_COMMON_PATHS]
 
     seen = set()
     page_urls = set()
     sources = []
 
-    for candidate in candidates:
+    def collect(candidate):
         if not is_allowed_url(candidate, scope):
-            continue
+            return False
 
         collect_sitemap_urls(
             session, candidate, scope, limiter, 0,
             seen, page_urls, sources
         )
 
-        if sources:
-            break
+        return bool(sources)
+
+    if declared:
+        for u in declared:
+            candidate = normalize_url(urljoin(seed_url, u))
+
+            if candidate:
+                collect(candidate)
+    else:
+        for p in SITEMAP_COMMON_PATHS:
+            if collect(base + p):
+                break
 
     return sorted(page_urls), sources
 

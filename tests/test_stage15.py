@@ -74,6 +74,36 @@ class SitemapDiscoveryTests(ServerTestCase):
         self.assertIn("Found sitemap(s)", self.stdout)
         self.assertIn("Seeding 2 URL(s)", self.stdout)
 
+    def test_multiple_declared_sitemaps_all_parsed(self):
+        s = self.server
+        s.add_robots(
+            "User-agent: *\nAllow: /\n"
+            f"Sitemap: {s.url('/sm-a.xml')}\n"
+            f"Sitemap: {s.url('/sm-b.xml')}\n")
+        s.add("/sm-a.xml",
+              urlset_xml(s.url("/p1")),
+              content_type="application/xml")
+        s.add("/sm-b.xml",
+              urlset_xml(s.url("/p2"), s.url("/p3")),
+              content_type="application/xml")
+        for p in ("/p1", "/p2", "/p3"):
+            s.add(p, p.lstrip("/") + " body")
+        s.add("/seed", "seed body")
+
+        stats = self.crawl(s.url("/seed"), max_pages=10, threads=1)
+
+        self.assertIn("/sm-a.xml", s.paths())
+        self.assertIn("/sm-b.xml", s.paths())
+        for probe in main.SITEMAP_COMMON_PATHS:
+            self.assertNotIn(probe, s.paths(),
+                             f"common probe {probe} should not run when "
+                             "robots declares sitemaps")
+        self.assertEqual(
+            self.indexed_paths(),
+            ["/p1", "/p2", "/p3", "/seed"])
+        self.assertEqual(stats["sitemaps_found"], 2)
+        self.assertEqual(stats["sitemap_urls"], 3)
+
     def test_fallback_to_common_places_when_no_declaration(self):
         s = self.server
         s.add_robots("User-agent: *\nAllow: /\n")
