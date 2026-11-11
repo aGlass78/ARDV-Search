@@ -6,7 +6,7 @@ a local SQLite database, and lets you search them from the command line — no e
 services, no API keys, no data leaving your machine.
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-215%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-234%20passing-brightgreen)
 
 ## Key Features
 
@@ -132,6 +132,7 @@ python main.py search "interesting topic" --limit 25
 | `--allow HOST[/PATH]` | none | Extra site to allow (repeatable to allow more sites) |
 | `--no-sitemap` | off / html + sitemap based discovery | Skip sitemap discovery entirely (robots.txt `Sitemap:` declaration + common-location probes); just crawl HTML links |
 | `--only-sitemap` | off / html + sitemap based discovery | Crawl only from sitemap URLs (no HTML link discovery); aborts with a message if no sitemap is found |
+| `--db FILE` | `result.db` | Database file for this crawl; relative paths are anchored next to main.py |
 
 **`python main.py search <query> [options]`**
 
@@ -141,6 +142,7 @@ python main.py search "interesting topic" --limit 25
 | `--limit N` | `10` | Maximum number of results (any positive number) |
 | `--e` | Disabled / Basic search functionality | Searches for the exact phrase without stemming |
 | `--es` | Disabled / Basic search functionality | Searches for the exact phrase with stemming |
+| `--db FILE` | `result.db` | Database file to search; if it doesn't exist, prints `No database found`|
 
 **Stemming:** Treats variations of the word as the same word; 'Bomb' would be treated same as 'Bombing'. Works by splitting the word into its base + a tense or any addition.                            
 **`python main.py --h`** — prints the guide
@@ -165,7 +167,7 @@ python main.py search "interesting topic" --limit 25
 
 ## Running the Tests (Running or not running tests doesnt effect app functionality; skip if not interested.)
 
-215 tests run on the standard library's `unittest` against a local HTTP server —
+234 tests run on the standard library's `unittest` against a local HTTP server —
 **no external network access is needed**:
 
 ```bash

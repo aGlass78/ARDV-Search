@@ -156,7 +156,7 @@ class LimitValidationTests(unittest.TestCase):
         with mock.patch.object(main, "search") as search:
             code, _, _ = run_cli(["search", "word", "--limit", "75"])
             self.assertIsNone(code)
-            search.assert_called_once_with("word", 75, False, False)
+            search.assert_called_once_with("word", 75, False, False, None)
 
 
 if __name__ == "__main__":

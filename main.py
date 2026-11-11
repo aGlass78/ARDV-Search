@@ -360,9 +360,35 @@ class RateLimiter:
             time.sleep(sleep_for)
 
 
-def get_database():
-    """Open or create the FTS5 database."""
-    conn = sqlite3.connect(DB_PATH)
+def resolve_db_path(value):
+    """Turn a --db value into a path, anchored next to main.py.
+
+    Relative values keep the project invariant that the database
+    location does not depend on the current working directory (just
+    like the default result.db). None means the default DB_PATH.
+
+    A value that already ends with ".db" is used verbatim; otherwise
+    ".db" is appended (case-insensitive check), so a bare --db name
+    never creates an extensionless file (e.g. --db custom creates
+    custom.db, not a file named "custom").
+    """
+    if value is None:
+        return DB_PATH
+
+    path = pathlib.Path(value)
+
+    if path.suffix.lower() != ".db":
+        path = pathlib.Path(str(path) + ".db")
+
+    if not path.is_absolute():
+        path = pathlib.Path(__file__).resolve().parent / path
+
+    return path
+
+
+def get_database(db_path=None):
+    """Open or create the FTS5 database at db_path (default DB_PATH)."""
+    conn = sqlite3.connect(resolve_db_path(db_path))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=FULL")
     conn.execute("PRAGMA busy_timeout=5000")
@@ -1318,6 +1344,7 @@ def crawl(
     threads=DEFAULT_THREADS,
     allowed=(),
     sitemap="auto",
+    db_path=None,
 ):
     """Crawl concurrently; max_pages=None means unlimited.
 
@@ -1390,7 +1417,7 @@ def crawl(
         "elapsed_seconds": 0.0,
     }
 
-    conn = get_database()
+    conn = get_database(db_path)
 
     merged = 0
 
@@ -1733,6 +1760,7 @@ def crawl(
 
     stats["elapsed_seconds"] = time.perf_counter() - started
     stats["queued"] = len(queue)
+    stats["db_path"] = str(resolve_db_path(db_path))
     return stats
 
 def print_crawl_summary(stats):
@@ -1778,7 +1806,7 @@ def print_crawl_summary(stats):
         f"{stats['parse_errors']} parsing, "
         f"{stats['db_errors']} database)"
     )
-    print("Database:", DB_PATH)
+    print("Database:", stats.get("db_path", DB_PATH))
 
 
 def _porter_stem(word):
@@ -1990,25 +2018,28 @@ def _fts_query(conn, match, limit):
     ).fetchall()
 
 
-def run_search(query, limit=10, exact=False, stem=False):
+def run_search(query, limit=10, exact=False, stem=False, db_path=None):
     """Return up to limit search results.
 
     exact (--e) searches for the whole query as one exact phrase -
     tokens in order, no prefix expansion, no stemming, and no OR
     fallback. stem (--es) Porter-stems each word so inflected forms
-    match ("google bomb" finds "google bombing"). Returns [] when the
-    database file does not exist; searching never creates the database
-    as a side effect.
+    match ("google bomb" finds "google bombing"). `db_path` selects the
+    database file to search (default DB_PATH). Returns [] when the
+    selected database file does not exist; searching never creates the
+    database as a side effect, and never falls back to another file.
     """
     words = extract_words(query)
 
     if not words or limit < 1:
         return []
 
-    if not DB_PATH.exists():
+    db_file = resolve_db_path(db_path)
+
+    if not db_file.exists():
         return []
 
-    conn = get_database()
+    conn = get_database(db_file)
 
     try:
         if exact:
@@ -2042,19 +2073,21 @@ def run_search(query, limit=10, exact=False, stem=False):
         conn.close()
 
 
-def search(query, limit=10, exact=False, stem=False):
+def search(query, limit=10, exact=False, stem=False, db_path=None):
     """Search the index and print results."""
     if not extract_words(query):
         print("Enter a search term.")
         return
 
-    if not DB_PATH.exists():
+    db_file = resolve_db_path(db_path)
+
+    if not db_file.exists():
         print("No database found - nothing has been crawled yet.")
-        print("Database location:", DB_PATH)
+        print("Database location:", db_file)
         print("Run a crawl first, e.g.: python main.py crawl <url>")
         return
 
-    rows = run_search(query, limit, exact, stem)
+    rows = run_search(query, limit, exact, stem, db_file)
 
     if not rows:
         print("No results found.")
@@ -2135,6 +2168,14 @@ def main():
         help="crawl only URLs from sitemaps; do not follow page links "
              "(aborts if no sitemap is found)"
     )
+    crawl_parser.add_argument(
+        "--db",
+        default=None,
+        metavar="FILE",
+        help="database file to create and index into (default: "
+             "result.db next to main.py; relative paths are anchored "
+             "there too)"
+    )
 
     search_parser = commands.add_parser("search")
     search_parser.add_argument("query")
@@ -2150,6 +2191,15 @@ def main():
         action="store_true",
         help="enable stemming, e.g. 'google bombing' matches a search "
              "for 'google bomb'"
+    )
+    search_parser.add_argument(
+        "--db",
+        default=None,
+        metavar="FILE",
+        help="database file to search (default: result.db next to "
+             "main.py; relative paths are anchored there too). If the "
+             "file does not exist, no fallback is attempted - the "
+             "search reports 'No database found'."
     )
 
     args = parser.parse_args()
@@ -2207,6 +2257,7 @@ def main():
             threads=args.threads,
             allowed=extra_entries,
             sitemap=sitemap_mode,
+            db_path=args.db,
         )
 
         if stats:
@@ -2219,7 +2270,7 @@ def main():
         if args.e and args.es:
             parser.error("--e and --es are mutually exclusive")
 
-        search(args.query, args.limit, args.e, args.es)
+        search(args.query, args.limit, args.e, args.es, args.db)
 
 
 if __name__ == "__main__":

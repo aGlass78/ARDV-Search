@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>ARDV Search</title>
+
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0a0a;
+      --surface: #0d0d0d;
+      --panel: #141414;
+      --text: #f4f4f4;
+      --muted: #888;
+      --border: #383838;
+      --hover: #191919;
+      --button-bg: #f4f4f4;
+      --button-text: #111;
+    }
+
+    body.light {
+      color-scheme: light;
+      --bg: #f7f7f7;
+      --surface: #fff;
+      --panel: #fff;
+      --text: #151515;
+      --muted: #777;
+      --border: #d5d5d5;
+      --hover: #eee;
+      --button-bg: #151515;
+      --button-text: #fff;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      transition: background .2s, color .2s;
+    }
+
+    button, input {
+      font: inherit;
+    }
+
+    button {
+      color: inherit;
+      cursor: pointer;
+    }
+
+    button:focus-visible,
+    input:focus-visible {
+      outline: 2px solid var(--muted);
+      outline-offset: 3px;
+    }
+
+    /* Header */
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 22px 28px;
+    }
+
+    /* Shared circular header buttons (theme + settings) */
+
+    .icon-button {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--muted);
+      transition: background .2s, color .2s;
+    }
+
+    .icon-button:hover {
+      background: var(--hover);
+      color: var(--text);
+    }
+
+    .icon-button svg {
+      width: 21px;
+      height: 21px;
+    }
+
+    /* Theme toggle: one circle, sun shows in dark mode,
+       moon shows in light mode. */
+
+    .theme-button {
+      position: relative;
+    }
+
+    .theme-button svg {
+      position: absolute;
+      transition: opacity .2s, transform .35s;
+    }
+
+    .theme-button .icon-moon {
+      opacity: 0;
+      transform: rotate(-90deg) scale(.5);
+    }
+
+    body.light .theme-button .icon-moon {
+      opacity: 1;
+      transform: rotate(0deg) scale(1);
+    }
+
+    body.light .theme-button .icon-sun {
+      opacity: 0;
+      transform: rotate(90deg) scale(.5);
+    }
+
+    /* Mode switcher (crawl / search) */
+
+    .mode-switch {
+      position: relative;
+      display: flex;
+      width: 240px;
+      padding: 4px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+    }
+
+    .seg-thumb {
+      position: absolute;
+      top: 4px;
+      bottom: 4px;
+      left: 4px;
+      width: calc(50% - 4px);
+      border-radius: 999px;
+      background: var(--button-bg);
+      transition: transform .25s cubic-bezier(.4, 0, .2, 1);
+    }
+
+    .mode-switch[data-mode="search"] .seg-thumb {
+      transform: translateX(100%);
+    }
+
+    .seg-button {
+      position: relative;
+      z-index: 1;
+      flex: 1;
+      padding: 8px 0;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+      transition: color .2s;
+    }
+
+    .seg-button:hover {
+      color: var(--text);
+    }
+
+    .seg-button.active {
+      color: var(--button-text);
+    }
+
+    /* Mode views */
+
+    .view {
+      animation: view-in .25s ease;
+    }
+
+    @keyframes view-in {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+    }
+
+    /* Main */
+
+    main {
+      width: 100%;
+      max-width: 780px;
+      margin: auto;
+      padding: 60px 24px 100px;
+      text-align: center;
+    }
+
+    .hero-title {
+      font-size: clamp(42px, 8vw, 70px);
+      font-weight: 750;
+      letter-spacing: -3px;
+      margin-bottom: 14px;
+    }
+
+    .hero-title span {
+      color: var(--muted);
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+      margin-bottom: 36px;
+    }
+
+    .search-form {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      padding: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: 16px;
+      transition: border-color .2s;
+    }
+
+    .search-form:focus-within {
+      border-color: var(--muted);
+    }
+
+    .search-icon {
+      width: 21px;
+      height: 21px;
+      color: var(--muted);
+      flex-shrink: 0;
+      margin-left: 10px;
+    }
+
+    .search-input {
+      width: 100%;
+      min-width: 0;
+      padding: 13px 0;
+      color: var(--text);
+      background: transparent;
+      border: 0;
+      outline: none;
+      font-size: 15px;
+    }
+
+    .search-input::placeholder {
+      color: var(--muted);
+    }
+
+    .search-button {
+      padding: 12px 20px;
+      background: var(--button-bg);
+      color: var(--button-text);
+      border: 0;
+      border-radius: 10px;
+      font-weight: 650;
+      transition: opacity .2s;
+    }
+
+    .search-button:hover {
+      opacity: .8;
+    }
+
+    .search-hint {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 18px;
+    }
+
+    .status {
+      margin: 25px auto 0;
+      max-width: 600px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+      overflow-wrap: anywhere;
+      min-height: 1.7em;
+    }
+
+    /* Empty Settings panel */
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      background: rgba(0, 0, 0, .55);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity .2s, visibility .2s;
+    }
+
+    .overlay.open {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .settings-panel {
+      position: fixed;
+      z-index: 11;
+      top: 0;
+      right: 0;
+      width: min(340px, 90vw);
+      height: 100vh;
+      height: 100dvh;
+      padding: 26px;
+      background: var(--panel);
+      border-left: 1px solid var(--border);
+      transform: translateX(100%);
+      transition: transform .25s ease;
+    }
+
+    .settings-panel.open {
+      transform: translateX(0);
+    }
+
+    .settings-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 22px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .settings-header h2 {
+      font-size: 19px;
+      font-weight: 700;
+    }
+
+    .close-button {
+      display: grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--muted);
+    }
+
+    .close-button:hover {
+      background: var(--hover);
+      color: var(--text);
+    }
+
+    .empty-settings {
+      margin-top: 24px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    footer {
+      padding: 20px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 520px) {
+      header {
+        padding: 18px 16px;
+      }
+
+      .mode-switch {
+        width: 190px;
+      }
+
+      main {
+        padding: 55px 18px 70px;
+      }
+
+      .hero-title {
+        letter-spacing: -2px;
+      }
+
+      .search-form {
+        gap: 8px;
+      }
+
+      .search-button {
+        padding: 12px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <!-- Theme toggle: single circle, sun (dark) / moon (light) -->
+    <button
+      class="icon-button theme-button"
+      id="themeToggle"
+      type="button"
+      aria-label="Switch to light theme"
+      aria-pressed="false"
+    >
+      <svg class="icon-sun"
+           viewBox="0 0 24 24"
+           fill="none"
+           stroke="currentColor"
+           stroke-width="1.8"
+           stroke-linecap="round"
+           stroke-linejoin="round"
+           aria-hidden="true">
+        <circle cx="12" cy="12" r="4"></circle>
+        <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42
+                 m11.3 11.3 1.42 1.42M2 12h2m16 0h2
+                 M4.93 19.07l1.42-1.42m11.3-11.3
+                 1.42-1.42"></path>
+      </svg>
+
+      <svg class="icon-moon"
+           viewBox="0 0 24 24"
+           fill="none"
+           stroke="currentColor"
+           stroke-width="1.8"
+           stroke-linecap="round"
+           stroke-linejoin="round"
+           aria-hidden="true">
+        <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+      </svg>
+    </button>
+
+    <nav class="mode-switch" id="modeSwitch" data-mode="search" aria-label="Crawl or search mode">
+      <span class="seg-thumb" aria-hidden="true"></span>
+
+      <button class="seg-button" data-mode="crawl" type="button" aria-pressed="false">
+        Crawl
+      </button>
+
+      <button class="seg-button" data-mode="search" type="button" aria-pressed="true">
+        Search
+      </button>
+    </nav>
+
+    <button
+      class="icon-button"
+      id="settingsButton"
+      type="button"
+      aria-label="Open settings"
+      aria-expanded="false"
+    >
+      <svg viewBox="0 0 24 24"
+           fill="none"
+           stroke="currentColor"
+           stroke-width="1.8"
+           stroke-linecap="round"
+           stroke-linejoin="round"
+           aria-hidden="true">
+        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1
+                 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73
+                 l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1
+                 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73
+                 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2
+                 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0
+                 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2
+                 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0
+                 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1
+                 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0
+                 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0
+                 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+        <circle cx="12" cy="12" r="3"></circle>
+      </svg>
+    </button>
+  </header>
+
+  <main>
+    <!-- Search view -->
+    <section class="view" id="searchView">
+      <h1 class="hero-title">ARDV <span>Search</span></h1>
+
+      <p class="subtitle">
+        A simple, clean place to start your search.
+      </p>
+
+      <form class="search-form" id="searchForm">
+        <svg class="search-icon"
+             viewBox="0 0 24 24"
+             fill="none"
+             stroke="currentColor"
+             stroke-width="1.8"
+             stroke-linecap="round"
+             aria-hidden="true">
+          <circle cx="11" cy="11" r="7"></circle>
+          <path d="m16 16 4 4"></path>
+        </svg>
+
+        <input
+          class="search-input"
+          id="searchInput"
+          type="search"
+          placeholder="Search the web..."
+          aria-label="Search the web"
+          autocomplete="off"
+        >
+
+        <button class="search-button" type="submit">
+          Search
+        </button>
+      </form>
+
+      <p class="search-hint">
+        Enter a search term and press Enter.
+      </p>
+
+      <div class="status" id="status" aria-live="polite"></div>
+    </section>
+
+    <!-- Crawl view -->
+    <section class="view" id="crawlView" hidden>
+      <h1 class="hero-title">ARDV <span>Crawler</span></h1>
+
+      <p class="subtitle">
+        Point the crawler at a website to index its pages.
+      </p>
+
+      <form class="search-form" id="crawlForm">
+        <svg class="search-icon"
+             viewBox="0 0 24 24"
+             fill="none"
+             stroke="currentColor"
+             stroke-width="1.8"
+             stroke-linecap="round"
+             aria-hidden="true">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0
+                   0-20"></path>
+          <path d="M2 12h20"></path>
+        </svg>
+
+        <input
+          class="search-input"
+          id="crawlInput"
+          type="text"
+          placeholder="https://example.com"
+          aria-label="Starting URL"
+          autocomplete="off"
+          spellcheck="false"
+        >
+
+        <button class="search-button" type="submit">
+          Crawl
+        </button>
+      </form>
+
+      <p class="search-hint">
+        Enter a starting URL and press Enter.
+      </p>
+
+      <div class="status" id="crawlStatus" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <footer>ARDV Search</footer>
+
+  <div class="overlay" id="overlay"></div>
+
+  <!-- Settings contains no menu items yet -->
+  <aside
+    class="settings-panel"
+    id="settingsPanel"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="settingsTitle"
+    aria-hidden="true"
+    inert
+  >
+    <div class="settings-header">
+      <h2 id="settingsTitle">Settings</h2>
+
+      <button
+        class="close-button"
+        id="closeSettings"
+        type="button"
+        aria-label="Close settings"
+      >
+        <svg width="20" height="20"
+             viewBox="0 0 24 24"
+             fill="none"
+             stroke="currentColor"
+             stroke-width="2"
+             stroke-linecap="round"
+             aria-hidden="true">
+          <path d="m18 6-12 12M6 6l12 12"></path>
+        </svg>
+      </button>
+    </div>
+
+    <p class="empty-settings">No settings available.</p>
+  </aside>
+
+  <script>
+    const body = document.body;
+    const themeToggle = document.getElementById("themeToggle");
+
+    const settingsButton =
+      document.getElementById("settingsButton");
+    const settingsPanel =
+      document.getElementById("settingsPanel");
+    const closeSettings =
+      document.getElementById("closeSettings");
+    const overlay = document.getElementById("overlay");
+
+    const searchForm = document.getElementById("searchForm");
+    const searchInput = document.getElementById("searchInput");
+    const status = document.getElementById("status");
+
+    function getSavedTheme() {
+      try {
+        return localStorage.getItem("ardv-theme") === "light"
+          ? "light"
+          : "dark";
+      } catch {
+        return "dark";
+      }
+    }
+
+    function applyTheme(theme) {
+      body.classList.toggle("light", theme === "light");
+
+      themeToggle.setAttribute(
+        "aria-pressed",
+        String(theme === "light")
+      );
+
+      themeToggle.setAttribute(
+        "aria-label",
+        theme === "light"
+          ? "Switch to dark theme"
+          : "Switch to light theme"
+      );
+
+      document.querySelector('meta[name="theme-color"]')
+        .setAttribute(
+          "content",
+          theme === "light" ? "#f7f7f7" : "#0a0a0a"
+        );
+
+      try {
+        localStorage.setItem("ardv-theme", theme);
+      } catch {
+        // Theme switching still works if storage is unavailable.
+      }
+    }
+
+    applyTheme(getSavedTheme());
+
+    themeToggle.addEventListener("click", () => {
+      const nextTheme = body.classList.contains("light")
+        ? "dark"
+        : "light";
+
+      applyTheme(nextTheme);
+    });
+
+    function openSettings() {
+      overlay.classList.add("open");
+      settingsPanel.classList.add("open");
+      settingsPanel.inert = false;
+      settingsPanel.setAttribute("aria-hidden", "false");
+      settingsButton.setAttribute("aria-expanded", "true");
+      closeSettings.focus();
+    }
+
+    function hideSettings() {
+      overlay.classList.remove("open");
+      settingsPanel.classList.remove("open");
+      settingsPanel.inert = true;
+      settingsPanel.setAttribute("aria-hidden", "true");
+      settingsButton.setAttribute("aria-expanded", "false");
+      settingsButton.focus();
+    }
+
+    settingsButton.addEventListener("click", openSettings);
+    closeSettings.addEventListener("click", hideSettings);
+    overlay.addEventListener("click", hideSettings);
+
+    document.addEventListener("keydown", (event) => {
+      if (
+        event.key === "Escape" &&
+        settingsPanel.classList.contains("open")
+      ) {
+        hideSettings();
+      }
+    });
+
+    // Placeholder: the search engine is not integrated yet.
+    function performSearch(query) {
+      const cleanedQuery = query.trim();
+
+      if (!cleanedQuery) {
+        searchInput.focus();
+        return;
+      }
+
+      status.textContent =
+        "Search is not connected yet - the search engine " +
+        "will be integrated here.";
+    }
+
+    searchForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      performSearch(searchInput.value);
+    });
+
+    // Mode switcher: toggles between the crawl and search views.
+    // The engine hooks up to these views later.
+
+    const modeSwitch = document.getElementById("modeSwitch");
+    const segButtons = modeSwitch.querySelectorAll(".seg-button");
+
+    const crawlForm = document.getElementById("crawlForm");
+    const crawlInput = document.getElementById("crawlInput");
+    const crawlStatus = document.getElementById("crawlStatus");
+
+    const views = {
+      crawl: document.getElementById("crawlView"),
+      search: document.getElementById("searchView")
+    };
+
+    function setMode(mode) {
+      modeSwitch.dataset.mode = mode;
+
+      segButtons.forEach((button) => {
+        const active = button.dataset.mode === mode;
+
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
+
+      for (const [name, view] of Object.entries(views)) {
+        view.hidden = name !== mode;
+      }
+
+      try {
+        localStorage.setItem("ardv-mode", mode);
+      } catch {
+        // Mode switching still works if storage is unavailable.
+      }
+
+      const input = mode === "crawl" ? crawlInput : searchInput;
+      input.focus({ preventScroll: true });
+    }
+
+    const savedMode = (() => {
+      try {
+        const mode = localStorage.getItem("ardv-mode");
+        return mode === "crawl" ? "crawl" : "search";
+      } catch {
+        return "search";
+      }
+    })();
+
+    setMode(savedMode);
+
+    segButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        setMode(button.dataset.mode);
+      });
+    });
+
+    // Placeholder: the crawler is not integrated yet.
+    crawlForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+
+      const cleanedQuery = crawlInput.value.trim();
+
+      if (!cleanedQuery) {
+        crawlInput.focus();
+        return;
+      }
+
+      crawlStatus.textContent =
+        "Crawling is not connected yet - the crawler " +
+        "will be integrated here.";
+    });
+  </script>
+</body>
+</html>
