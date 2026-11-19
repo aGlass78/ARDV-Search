@@ -6,7 +6,7 @@ a local SQLite database, and lets you search them from the command line — no e
 services, no API keys, no data leaving your machine.
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-234%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-237%20passing-brightgreen)
 
 ## Key Features
 
@@ -33,22 +33,44 @@ services, no API keys, no data leaving your machine.
 - SQLite with FTS5 (bundled with Python's standard `sqlite3` module)
 - `requests` and `beautifulsoup4` — pinned in [`requirements.txt`](requirements.txt)
 
-## Setup
+## Setup (For Windows)
+
+- Search and open 'powershell"
+
+- Run the command `winget install git` and continue with the installation. This installs git for easier setup.
+
+- Open your desired directory(folder) in which you want the program to be installed.
+
+- Click on the address bar.
+
+<img src="images/address bar.png" alt="Address bar image" width="600">
+
+- Type "cmd" in the address bar.
+
+- Run the following commands in order.
 
 ```bash
+# Clones the repo
 git clone https://github.com/aGlass78/ARDV-Search
-cd "path/to/repo" #The path to the copied repo
-
-# virtual environment (optional but recommended)
+# Changes working dir. into the created folder.
+cd ARDV-Search
+# Creates the virtual enviornment
 python -m venv .venv
+
 # On Linux / macOS
-source .venv/bin/activate  
+source .venv/bin/activate
 # On Windows      
 .venv\Scripts\activate          
 
 # install dependencies
 python -m pip install -r requirements.txt
 ```
+
+- Open powershell again 
+
+- Run the command `winget uninstall git`, this uninstalls git if you have no further use of it.
+
+- The setup is complete! To run the program open the folder named "ARDV-Search" and open cmd inside the folder from the address bar as done before.
 
 ### Contact email (optional)
 
@@ -64,6 +86,8 @@ left empty, the crawler simply identifies itself as `ModelSearchEngine (educatio
 crawler)` with no contact section. 
 
 ## Usage
+
+Open cmd from the address bar inside the folder to run these commands.
 
 Crawl a site, then search it (Example 'https://quotes.toscrape.com'):
 
@@ -167,7 +191,7 @@ python main.py search "interesting topic" --limit 25
 
 ## Running the Tests (Running or not running tests doesnt effect app functionality; skip if not interested.)
 
-234 tests run on the standard library's `unittest` against a local HTTP server —
+237 tests run on the standard library's `unittest` against a local HTTP server —
 **no external network access is needed**:
 
 ```bash

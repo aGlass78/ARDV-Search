@@ -1690,7 +1690,10 @@ def crawl(
                 except sqlite3.Error as error:
                     # Roll back the open batch rather than keep a
                     # half-written page; affected pages are simply
-                    # re-crawled on the next run.
+                    # re-crawled on the next run. The pages in the
+                    # open batch were already counted in `saved` /
+                    # stats["indexed"], but the rollback undoes them,
+                    # so un-count them to keep the statistics honest.
                     stats["db_errors"] += 1
                     stats["errors"] += 1
                     print(
@@ -1698,6 +1701,10 @@ def crawl(
                     )
                     try:
                         conn.rollback()
+                        saved -= pending_commits
+                        if saved < 0:
+                            saved = 0
+                        stats["indexed"] = saved
                         pending_commits = 0
                     except sqlite3.Error:
                         pass
@@ -1756,6 +1763,14 @@ def crawl(
                 conn.commit()
             except sqlite3.Error as error:
                 print(f"Final database commit failed: {error}")
+                # The uncommitted pages never made it into the file -
+                # un-count them and record the database error.
+                saved -= pending_commits
+                if saved < 0:
+                    saved = 0
+                stats["indexed"] = saved
+                stats["db_errors"] += 1
+                stats["errors"] += 1
         conn.close()
 
     stats["elapsed_seconds"] = time.perf_counter() - started
