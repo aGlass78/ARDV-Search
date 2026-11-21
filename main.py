@@ -23,6 +23,7 @@ DEFAULT_MAX_BYTES = 2_000_000
 DEFAULT_THREADS = 8
 MAX_REDIRECTS = 10
 DB_COMMIT_BATCH = 25
+PROGRESS_INTERVAL = 1.0  # seconds between progress-callback reports
 ROBOTS_RETRY_SECONDS = 300.0
 
 # Sitemap discovery: probed (in order) when robots.txt declares no
@@ -405,6 +406,15 @@ def get_database(db_path=None):
 
     conn.commit()
     return conn
+
+
+class DatabaseNotFoundError(Exception):
+    """Raised when the database file selected for a search does not exist.
+
+    Distinct from sqlite3.Error so callers (e.g. the Flask API in
+    app.py) can map "the requested database is missing" to a specific
+    response without conflating it with a corrupt or failing database.
+    """
 
 
 def normalize_url(url):
@@ -1345,6 +1355,7 @@ def crawl(
     allowed=(),
     sitemap="auto",
     db_path=None,
+    progress_callback=None,
 ):
     """Crawl concurrently; max_pages=None means unlimited.
 
@@ -1356,6 +1367,12 @@ def crawl(
     queue from the site's sitemap when one exists, "skip" ignores
     sitemaps entirely, and "only" crawls sitemap URLs without
     following page links (aborting when no sitemap exists).
+
+    `progress_callback`, when given, is called every
+    PROGRESS_INTERVAL seconds during the crawl with a JSON-safe
+    snapshot of the current stats dict. The callback runs on a
+    background thread and must not block for long; exceptions raised
+    by it are swallowed so a broken callback never breaks the crawl.
     """
     start_url = normalize_url(start_url)
     scope = (
@@ -1502,6 +1519,31 @@ def crawl(
 
     saved = 0
     pending_commits = 0
+
+    # Optional periodic progress reporting: the callback receives a
+    # JSON-safe snapshot of `stats` roughly every PROGRESS_INTERVAL
+    # seconds on a background daemon thread until the crawl finishes.
+    progress_stop = threading.Event()
+    progress_thread = None
+
+    if progress_callback is not None:
+        def _report_progress():
+            while not progress_stop.wait(PROGRESS_INTERVAL):
+                try:
+                    progress_callback(
+                        {k: v for k, v in stats.items()
+                         if isinstance(v, (int, float, str, bool))
+                         or v is None}
+                    )
+                except Exception:
+                    pass  # a broken callback never breaks the crawl
+
+        progress_thread = threading.Thread(
+            target=_report_progress,
+            name="crawl-progress",
+            daemon=True,
+        )
+        progress_thread.start()
 
     executor = ThreadPoolExecutor(
         max_workers=threads,
@@ -1773,6 +1815,10 @@ def crawl(
                 stats["errors"] += 1
         conn.close()
 
+        if progress_thread is not None:
+            progress_stop.set()
+            progress_thread.join(timeout=2.0)
+
     stats["elapsed_seconds"] = time.perf_counter() - started
     stats["queued"] = len(queue)
     stats["db_path"] = str(resolve_db_path(db_path))
@@ -1822,6 +1868,131 @@ def print_crawl_summary(stats):
         f"{stats['db_errors']} database)"
     )
     print("Database:", stats.get("db_path", DB_PATH))
+
+
+def _normalize_crawl_args(url, max_pages=None, delay=None, max_bytes=None,
+                          threads=None, allow=None, sitemap=None, db=None):
+    """Validate crawl inputs and return normalized kwargs for crawl_json().
+
+    Raises ValueError(msg) on invalid input. None (or omitted) means
+    "use the engine default"; the returned dict's keys match crawl_json()'s
+    public parameter names, so app.py can pass it straight through.
+    """
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("url must be a non-empty string")
+    if normalize_url(url) is None:
+        raise ValueError(f"invalid URL: {url!r}")
+
+    def _positive_int(name, value):
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{name} must be an integer")
+        if value < 1:
+            raise ValueError(f"{name} must be at least 1")
+        return value
+
+    def _non_negative_float(name, value):
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{name} must be a number")
+        value = float(value)
+        if value < 0:
+            raise ValueError(f"{name} cannot be negative")
+        return value
+
+    max_pages = _positive_int("max_pages", max_pages)
+    max_bytes = _positive_int("max_bytes", max_bytes)
+    threads = _positive_int("threads", threads)
+    delay = _non_negative_float("delay", delay)
+
+    if sitemap is None:
+        sitemap = "auto"
+    elif sitemap not in ("auto", "skip", "only"):
+        raise ValueError("sitemap must be 'auto', 'skip', or 'only'")
+
+    if allow is None:
+        allow = ()
+    else:
+        try:
+            allow = tuple(allow)
+        except TypeError:
+            raise ValueError("allow must be a list of strings") from None
+        for entry in allow:
+            if not isinstance(entry, str) or parse_scope_entry(entry) is None:
+                raise ValueError(f"invalid allow entry: {entry!r}")
+
+    if db is not None and not isinstance(db, str):
+        raise ValueError("db must be a string")
+
+    return {
+        "url": url,
+        "max_pages": max_pages,
+        "delay": delay if delay is not None else DEFAULT_DELAY,
+        "max_bytes": max_bytes if max_bytes is not None else DEFAULT_MAX_BYTES,
+        "threads": threads if threads is not None else DEFAULT_THREADS,
+        "allow": allow,
+        "sitemap": sitemap,
+        "db": db,
+    }
+
+
+def crawl_json(url, max_pages=None, delay=None, max_bytes=None,
+               threads=None, allow=None, sitemap=None, db=None,
+               progress_callback=None):
+    """Run a crawl and return the JSON-compatible stats dictionary.
+
+    Programmatic twin of crawl() for web frontends / the Flask API.
+    It accepts the same options as crawl(), but:
+
+      - None (or omitted) means "use the engine default";
+      - values are type/range-checked BEFORE the crawl starts, and a
+        bad value raises ValueError with a reason (the Flask API maps
+        that to HTTP 400) instead of printing and returning None;
+      - on success it returns exactly what crawl() returns - the stats
+        dict - which is JSON-serializable (ints, floats, strings,
+        booleans, None).
+
+    Parameter notes (mirror the CLI):
+
+      - ``url``: required seed URL (must be a valid http(s) URL).
+      - ``max_pages`` / ``max_bytes`` / ``threads``: positive integers.
+      - ``delay``: non-negative number of seconds.
+      - ``allow``: iterable of "host" or "host/path" scope entries.
+      - ``sitemap``: "auto" (default), "skip", or "only".
+      - ``db``: database file for this crawl (None = engine default;
+        the name matches the JSON payload and the CLI's --db). See
+        resolve_db_path for anchoring/.db rules.
+      - ``progress_callback``: passed straight through to crawl(); see
+        its docstring. This is how the web API streams live stats.
+    """
+    normalized = _normalize_crawl_args(
+        url,
+        max_pages=max_pages,
+        delay=delay,
+        max_bytes=max_bytes,
+        threads=threads,
+        allow=allow,
+        sitemap=sitemap,
+        db=db,
+    )
+    result = crawl(
+        normalized["url"],
+        max_pages=normalized["max_pages"],
+        delay=normalized["delay"],
+        max_bytes=normalized["max_bytes"],
+        threads=normalized["threads"],
+        allowed=normalized["allow"],
+        sitemap=normalized["sitemap"],
+        db_path=normalized["db"],
+        progress_callback=progress_callback,
+    )
+    if result is None:
+        # crawl() only returns None when validation failed; everything
+        # above was validated, so this is defensive.
+        raise ValueError("invalid crawl parameters")
+    return result
 
 
 def _porter_stem(word):
@@ -2118,6 +2289,103 @@ def search(query, limit=10, exact=False, stem=False, db_path=None):
         print("   URL:", url)
         print("   ", description or excerpt)
         print()
+
+
+
+def search_json(query, limit=10, exact=False, stem=False, db_path=None):
+    """Run a search and return a JSON-compatible result dictionary.
+
+    This is the programmatic entry point for web frontends or any
+    Python caller. It is independent of the CLI and of Flask: call it
+    directly (import main; main.search_json(...)) and it never writes
+    to the database and never creates one.
+
+    Returned structure (stable, documented):
+
+        {
+          "query": <str, the original query string>,
+          "results": [
+            {
+              "title": <str, page title (may be empty)>,
+              "url": <str, canonical page URL>,
+              "snippet": <str, description if present else FTS5
+                            highlighted excerpt>
+            },
+            ...
+          ],
+          "total_results": <int, total matches before the limit>,
+          "search_time": <float, seconds spent searching>
+        }
+
+    Behavior:
+
+    - An empty or unparseable query (or a limit < 1) returns an empty
+      result set without error ({"results": [], "total_results": 0}).
+    - If the selected database file does not exist, DatabaseNotFoundError
+      is raised - the caller decides how to surface it (the Flask API
+      maps it to 404).
+    - If the database is corrupt or unreadable, sqlite3.Error
+      propagates - the caller maps it to a 5xx response.
+    - The same search semantics as the CLI apply: exact (--e) phrase
+      matching, stem (--es) Porter stemming, and the AND -> OR
+      fallback. "total_results" is counted with whichever match
+      expression produced the returned rows.
+    """
+
+    started = time.perf_counter()
+    words = extract_words(query)
+
+    if not words or limit < 1:
+        return {
+            "query": query,
+            "results": [],
+            "total_results": 0,
+            "search_time": round(time.perf_counter() - started, 6),
+        }
+
+    db_file = resolve_db_path(db_path)
+
+    if not db_file.exists():
+        raise DatabaseNotFoundError(str(db_file))
+
+    conn = get_database(db_file)
+
+    try:
+        if exact:
+            match = build_exact_match(words)
+            rows = _fts_query(conn, match, limit)
+        else:
+            match = build_match(words, "AND", stem)
+            rows = _fts_query(conn, match, limit)
+
+            # Fall back to any-word matching when AND finds nothing.
+            if not rows:
+                match = build_match(words, "OR", stem)
+                rows = _fts_query(conn, match, limit)
+
+        total = conn.execute(
+            "SELECT COUNT(*) FROM pages WHERE pages MATCH ?",
+            (match,),
+        ).fetchone()[0]
+
+        results = [
+            {
+                "title": title,
+                "url": url,
+                "snippet": description or excerpt,
+            }
+            for url, title, description, excerpt in rows
+        ]
+    finally:
+        conn.close()
+
+    return {
+        "query": query,
+        "results": results,
+        "total_results": total,
+        "search_time": round(time.perf_counter() - started, 6),
+    }
+
 
 
 def main():

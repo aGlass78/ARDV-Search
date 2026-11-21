@@ -254,6 +254,7 @@
     }
 
     .search-button {
+      min-width: 96px;
       padding: 12px 20px;
       background: var(--button-bg);
       color: var(--button-text);
@@ -263,19 +264,54 @@
       transition: opacity .2s;
     }
 
-    .search-button:hover {
+    .search-button:hover:not(:disabled) {
       opacity: .8;
+    }
+
+    .search-button:disabled {
+      opacity: .55;
+      cursor: default;
+    }
+
+    /* Inline option row under the search bar */
+
+    .search-options {
+      display: flex;
+      justify-content: flex-start;
+      margin-top: 10px;
+    }
+
+    .phrase-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .phrase-toggle input {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--button-bg);
+      cursor: pointer;
+    }
+
+    .phrase-toggle input:disabled + span {
+      opacity: .45;
+      cursor: default;
     }
 
     .search-hint {
       color: var(--muted);
       font-size: 12px;
-      margin-top: 18px;
+      margin-top: 14px;
     }
 
     .status {
-      margin: 25px auto 0;
-      max-width: 600px;
+      margin: 18px auto 0;
+      max-width: 640px;
       color: var(--muted);
       font-size: 14px;
       line-height: 1.7;
@@ -283,7 +319,146 @@
       min-height: 1.7em;
     }
 
-    /* Empty Settings panel */
+    /* Results (rendered from the backend JSON) */
+
+    .results {
+      max-width: 640px;
+      margin: 40px auto 0;
+      text-align: left;
+    }
+
+    .results:empty {
+      margin: 0;
+    }
+
+    .results-meta {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 24px;
+    }
+
+    .result {
+      margin-bottom: 26px;
+    }
+
+    .result-url {
+      display: block;
+      width: fit-content;
+      max-width: 100%;
+      color: var(--muted);
+      font-size: 12px;
+      text-decoration: none;
+      overflow-wrap: anywhere;
+      margin-bottom: 4px;
+    }
+
+    .result-url:hover {
+      text-decoration: underline;
+    }
+
+    .result-title {
+      display: inline-block;
+      color: var(--text);
+      font-size: 17px;
+      font-weight: 550;
+      line-height: 1.4;
+      text-decoration: none;
+      overflow-wrap: anywhere;
+    }
+
+    .result-title:hover {
+      text-decoration: underline;
+    }
+
+    .result-snippet {
+      color: var(--muted);
+      font-size: 13.5px;
+      line-height: 1.65;
+      margin-top: 5px;
+      overflow-wrap: anywhere;
+    }
+
+    /* Loading / empty / error states */
+
+    .state-box {
+      margin-top: 40px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+      text-align: center;
+    }
+
+    .state-box .state-title {
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .state-box svg {
+      width: 34px;
+      height: 34px;
+      opacity: .5;
+      margin-bottom: 10px;
+    }
+
+    .skeleton-row {
+      padding: 4px 0;
+    }
+
+    .skeleton-bar {
+      height: 12px;
+      border-radius: 6px;
+      margin-bottom: 10px;
+      background: linear-gradient(90deg,
+        var(--hover) 25%, var(--panel) 50%, var(--hover) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s ease-in-out infinite;
+    }
+
+    .skeleton-bar.url {
+      width: 45%;
+      height: 9px;
+    }
+
+    .skeleton-bar.title {
+      width: 70%;
+      height: 15px;
+    }
+
+    .skeleton-bar.w-60 { width: 60%; }
+    .skeleton-bar.w-80 { width: 80%; }
+
+    @keyframes shimmer {
+      from { background-position: 200% 0; }
+      to { background-position: -200% 0; }
+    }
+
+    /* Crawl stats (rendered from the backend stats object) */
+
+    .stats-list {
+      display: grid;
+      grid-template-columns: minmax(120px, 40%) 1fr;
+      row-gap: 8px;
+      column-gap: 16px;
+      margin-top: 18px;
+      text-align: left;
+    }
+
+    .stats-list dt {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: capitalize;
+      padding-top: 1px;
+    }
+
+    .stats-list dd {
+      color: var(--text);
+      font-size: 13.5px;
+      overflow-wrap: anywhere;
+    }
+
+    /* Settings panel */
 
     .overlay {
       position: fixed;
@@ -305,7 +480,7 @@
       z-index: 11;
       top: 0;
       right: 0;
-      width: min(340px, 90vw);
+      width: min(360px, 90vw);
       height: 100vh;
       height: 100dvh;
       padding: 26px;
@@ -313,6 +488,7 @@
       border-left: 1px solid var(--border);
       transform: translateX(100%);
       transition: transform .25s ease;
+      overflow-y: auto;
     }
 
     .settings-panel.open {
@@ -322,7 +498,7 @@
     .settings-header {
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      gap: 14px;
       padding-bottom: 22px;
       border-bottom: 1px solid var(--border);
     }
@@ -330,6 +506,13 @@
     .settings-header h2 {
       font-size: 19px;
       font-weight: 700;
+      margin-right: auto;
+    }
+
+    .dev-label {
+      color: var(--muted);
+      font-size: 12px;
+      user-select: none;
     }
 
     .close-button {
@@ -348,11 +531,114 @@
       color: var(--text);
     }
 
-    .empty-settings {
-      margin-top: 24px;
+    /* Toggle switches (Developer, Exact, sitemap modes) */
+
+    .switch {
+      flex-shrink: 0;
+      width: 34px;
+      height: 19px;
+      padding: 2px;
+      border: 0;
+      border-radius: 20px;
+      background: var(--border);
+      display: flex;
+      align-items: center;
+      transition: background .2s;
+    }
+
+    .switch:hover {
+      background: var(--muted);
+    }
+
+    .switch-knob {
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      background: var(--bg);
+      transition: transform .2s, background .2s;
+    }
+
+    .switch[aria-checked="true"] {
+      background: var(--button-bg);
+    }
+
+    .switch[aria-checked="true"] .switch-knob {
+      transform: translateX(15px);
+      background: var(--button-text);
+    }
+
+    /* Settings content */
+
+    .settings-group[hidden] {
+      display: none;
+    }
+
+    .group-title {
       color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin: 24px 0 4px;
+    }
+
+    .setting {
+      margin-top: 14px;
+    }
+
+    .setting-label {
+      display: block;
+      color: var(--text);
       font-size: 13px;
-      line-height: 1.7;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .setting-input {
+      width: 100%;
+      padding: 9px 11px;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+      font-size: 14px;
+      transition: border-color .2s;
+    }
+
+    .setting-input:focus {
+      border-color: var(--muted);
+    }
+
+    .setting-input::placeholder {
+      color: var(--muted);
+      opacity: .7;
+    }
+
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .setting-row .setting-label {
+      margin-bottom: 0;
+    }
+
+    /* Developer-only settings are hidden unless the
+       Developer toggle in the panel header is on. */
+
+    .dev-settings {
+      display: none;
+      margin-top: 8px;
+      padding-top: 4px;
+      border-top: 1px dashed var(--border);
+    }
+
+    body.dev-on .dev-settings {
+      display: block;
     }
 
     footer {
@@ -385,6 +671,7 @@
 
       .search-button {
         padding: 12px;
+        min-width: 84px;
       }
     }
   </style>
@@ -500,16 +787,26 @@
           autocomplete="off"
         >
 
-        <button class="search-button" type="submit">
+        <button class="search-button" id="searchButton" type="submit">
           Search
         </button>
       </form>
+
+      <div class="search-options">
+        <label class="phrase-toggle"
+               title="Word endings are ignored (stemming + prefix match): 'cats' also finds 'cat' (--es). Enabled by default. Mutually exclusive with Exact match in developer settings.">
+          <input type="checkbox" id="phraseToggle" checked>
+          <span>Phrase Search</span>
+        </label>
+      </div>
 
       <p class="search-hint">
         Enter a search term and press Enter.
       </p>
 
       <div class="status" id="status" aria-live="polite"></div>
+
+      <div class="results" id="results" aria-live="polite"></div>
     </section>
 
     <!-- Crawl view -->
@@ -544,7 +841,7 @@
           spellcheck="false"
         >
 
-        <button class="search-button" type="submit">
+        <button class="search-button" id="crawlButton" type="submit">
           Crawl
         </button>
       </form>
@@ -554,6 +851,8 @@
       </p>
 
       <div class="status" id="crawlStatus" aria-live="polite"></div>
+
+      <div class="results" id="crawlResults" aria-live="polite"></div>
     </section>
   </main>
 
@@ -561,7 +860,6 @@
 
   <div class="overlay" id="overlay"></div>
 
-  <!-- Settings contains no menu items yet -->
   <aside
     class="settings-panel"
     id="settingsPanel"
@@ -573,6 +871,20 @@
   >
     <div class="settings-header">
       <h2 id="settingsTitle">Settings</h2>
+
+      <span class="dev-label">Developer</span>
+
+      <button
+        class="switch"
+        id="devToggle"
+        type="button"
+        role="switch"
+        aria-checked="false"
+        aria-label="Developer settings"
+        title="Show developer settings (advanced engine options)"
+      >
+        <span class="switch-knob"></span>
+      </button>
 
       <button
         class="close-button"
@@ -592,10 +904,167 @@
       </button>
     </div>
 
-    <p class="empty-settings">No settings available.</p>
+    <!-- Search settings (visible while Search mode is active) -->
+    <div class="settings-group" id="searchSettings" data-for="search">
+      <p class="group-title">Search settings</p>
+
+      <div class="setting"
+           title="Maximum number of results to return (--limit). Integer, at least 1. Default: 10.">
+        <label class="setting-label" for="limitInput">Max results</label>
+        <input class="setting-input" id="limitInput" type="text"
+               inputmode="numeric" autocomplete="off"
+               placeholder="10">
+      </div>
+
+      <div class="setting"
+           title="Database file to search (--db). Relative paths anchor next to main.py; '.db' is appended if missing from the name. The file must exist — a search never creates one. Default: result.db.">
+        <label class="setting-label" for="searchDbInput">Database</label>
+        <input class="setting-input" id="searchDbInput" type="text"
+               autocomplete="off" spellcheck="false"
+               placeholder="result.db">
+      </div>
+
+      <!-- Developer-only search setting -->
+      <div class="dev-settings">
+        <p class="group-title">Developer</p>
+
+        <div class="setting-row"
+             title="Exact phrase search: all words must appear together, in order — no prefix matching, no stemming, no any-word fallback (--e). Mutually exclusive with Phrase Search.">
+          <span class="setting-label">Exact match</span>
+
+          <button class="switch" id="exactSwitch" type="button"
+                  role="switch" aria-checked="false">
+            <span class="switch-knob"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Crawl settings (visible while Crawl mode is active) -->
+    <div class="settings-group" id="crawlSettings" data-for="crawl" hidden>
+      <p class="group-title">Crawl settings</p>
+
+      <div class="setting"
+           title="Maximum number of pages to index (--max-pages). Integer, at least 1. Leave empty for no limit.">
+        <label class="setting-label" for="maxPagesInput">Max pages</label>
+        <input class="setting-input" id="maxPagesInput" type="text"
+               inputmode="numeric" autocomplete="off"
+               placeholder="e.g. 50">
+      </div>
+
+      <div class="setting"
+           title="Extra sites to allow beyond the seed's host and its subdomains (--allow). Comma-separated: 'host' or 'host/path'. Example: example.com, example.org/page">
+        <label class="setting-label" for="allowInput">Additional sites</label>
+        <input class="setting-input" id="allowInput" type="text"
+               autocomplete="off" spellcheck="false"
+               placeholder="example.com, example.org/page">
+      </div>
+
+      <div class="setting"
+           title="Database file for this crawl (--db). Created if missing; '.db' is appended if missing from the name. Relative paths anchor next to main.py. Default: result.db.">
+        <label class="setting-label" for="crawlDbInput">Database</label>
+        <input class="setting-input" id="crawlDbInput" type="text"
+               autocomplete="off" spellcheck="false"
+               placeholder="result.db">
+      </div>
+
+      <!-- Developer-only crawl settings -->
+      <div class="dev-settings">
+        <p class="group-title">Developer</p>
+
+        <div class="setting"
+             title="Minimum seconds between requests to the same host (--delay). Float, 0 or more. Default: 0. robots.txt Crawl-delay and Retry-After always apply on top of this.">
+          <label class="setting-label" for="delayInput">Delay (seconds)</label>
+          <input class="setting-input" id="delayInput" type="text"
+                 inputmode="decimal" autocomplete="off"
+                 placeholder="0">
+        </div>
+
+        <div class="setting"
+             title="Maximum bytes to download per page (--max-bytes). Integer, at least 1. Default: 2000000 (2 MB).">
+          <label class="setting-label" for="maxBytesInput">Max bytes per page</label>
+          <input class="setting-input" id="maxBytesInput" type="text"
+                 inputmode="numeric" autocomplete="off"
+                 placeholder="2000000">
+        </div>
+
+        <div class="setting"
+             title="Number of concurrent worker threads (--threads). Integer, at least 1. Default: 8.">
+          <label class="setting-label" for="threadsInput">Threads</label>
+          <input class="setting-input" id="threadsInput" type="text"
+                 inputmode="numeric" autocomplete="off"
+                 placeholder="8">
+        </div>
+
+        <div class="setting-row"
+             title="Skip sitemap discovery entirely; run the HTML link crawler only (--no-sitemap). Mutually exclusive with Only sitemap.">
+          <span class="setting-label">No sitemap</span>
+
+          <button class="switch" id="noSitemapSwitch" type="button"
+                  role="switch" aria-checked="false">
+            <span class="switch-knob"></span>
+          </button>
+        </div>
+
+        <div class="setting-row"
+             title="Crawl ONLY from sitemap URLs; HTML link discovery is disabled. Aborts if no sitemap is found (--only-sitemap). Mutually exclusive with No sitemap.">
+          <span class="setting-label">Only sitemap</span>
+
+          <button class="switch" id="onlySitemapSwitch" type="button"
+                  role="switch" aria-checked="false">
+            <span class="switch-knob"></span>
+          </button>
+        </div>
+      </div>
+    </div>
   </aside>
 
   <script>
+    /* ============================================================
+       Frontend <-> backend contract (expected Flask API)
+       ============================================================
+       The frontend is independent of the engine internals. It talks
+       to relative endpoints on the same origin — the Flask app
+       (app.py) serves both this page and the API, so there is no
+       CORS and no separate dev server.
+
+       GET /api/search
+         q      (required)  search query string
+         limit  (optional)  integer >= 1; omit for engine default (10)
+         exact  (optional)  1 -> --e (exact phrase); default 0
+         stem   (optional)  1 -> --es (stemming); default 1 from the UI
+         db     (optional)  database path; omit for engine default
+
+         200 -> { "query": str,
+                  "results": [ { "title": str, "url": str,
+                                 "snippet": str }, ... ],
+                  "total_results": int,   // before limit is applied
+                  "search_time": float }  // seconds
+         error -> non-200 with { "error": "message" }
+                  (400 invalid limit, 404 database not found,
+                   500 internal — see app.py)
+
+       POST /api/crawl   (JSON body; endpoint to be added in app.py)
+         { "url": str,                 // required, seed URL
+           "max_pages": int | null,    // --max-pages
+           "delay": float | null,      // --delay
+           "max_bytes": int | null,    // --max-bytes
+           "threads": int | null,      // --threads
+           "allow": [ "host" | "host/path", ... ],   // --allow
+           "sitemap": "auto" | "skip" | "only",      // --no-sitemap /
+                                                     // --only-sitemap
+           "db": str }                 // --db
+         200 -> crawl stats object (free-form); primitive fields are
+                rendered as a summary list.
+         error -> non-200 with { "error": "message" }
+
+       The search endpoint mirrors main.search_json(); the crawl
+       endpoint mirrors main.crawl().
+       ============================================================ */
+
+    const API_SEARCH = "/api/search";
+    const API_CRAWL = "/api/crawl";
+
     const body = document.body;
     const themeToggle = document.getElementById("themeToggle");
 
@@ -607,9 +1076,110 @@
       document.getElementById("closeSettings");
     const overlay = document.getElementById("overlay");
 
+    const modeSwitch = document.getElementById("modeSwitch");
+    const segButtons = modeSwitch.querySelectorAll(".seg-button");
+
     const searchForm = document.getElementById("searchForm");
     const searchInput = document.getElementById("searchInput");
+    const searchButton = document.getElementById("searchButton");
     const status = document.getElementById("status");
+    const results = document.getElementById("results");
+
+    const crawlForm = document.getElementById("crawlForm");
+    const crawlInput = document.getElementById("crawlInput");
+    const crawlButton = document.getElementById("crawlButton");
+    const crawlStatus = document.getElementById("crawlStatus");
+    const crawlResults = document.getElementById("crawlResults");
+
+    const phraseToggle = document.getElementById("phraseToggle");
+
+    const devToggle = document.getElementById("devToggle");
+    const exactSwitch = document.getElementById("exactSwitch");
+    const noSitemapSwitch =
+      document.getElementById("noSitemapSwitch");
+    const onlySitemapSwitch =
+      document.getElementById("onlySitemapSwitch");
+
+    const searchSettings =
+      document.getElementById("searchSettings");
+    const crawlSettings =
+      document.getElementById("crawlSettings");
+
+    /* ---------- settings state (persisted) ---------- */
+
+    const DEFAULT_SETTINGS = {
+      developer: false,
+      phrase: true,
+      search: { limit: "", db: "result.db", exact: false },
+      crawl: {
+        max_pages: "",
+        allow: "",
+        db: "result.db",
+        delay: "",
+        max_bytes: "",
+        threads: "",
+        sitemap: "auto"
+      }
+    };
+
+    function loadSettings() {
+      const merged = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+
+      try {
+        const raw = localStorage.getItem("ardv-settings");
+
+        if (raw) {
+          const saved = JSON.parse(raw);
+
+          if (typeof saved.developer === "boolean") {
+            merged.developer = saved.developer;
+          }
+
+          if (typeof saved.phrase === "boolean") {
+            merged.phrase = saved.phrase;
+          }
+
+          for (const section of ["search", "crawl"]) {
+            if (saved[section] && typeof saved[section] === "object") {
+              Object.assign(merged[section], saved[section]);
+            }
+          }
+        }
+      } catch {
+        // Corrupt settings fall back to the defaults.
+      }
+
+      return merged;
+    }
+
+    const settings = loadSettings();
+
+    function saveSettings() {
+      try {
+        localStorage.setItem(
+          "ardv-settings",
+          JSON.stringify(settings)
+        );
+      } catch {
+        // Settings switching still works if storage is unavailable.
+      }
+    }
+
+    function parsePositiveInt(value) {
+      const n = Number.parseInt(value, 10);
+      return Number.isInteger(n) && n >= 1 ? n : null;
+    }
+
+    function parseNonNegativeFloat(value) {
+      const n = Number.parseFloat(value);
+      return Number.isFinite(n) && n >= 0 ? n : null;
+    }
+
+    function applySwitch(switchEl, on) {
+      switchEl.setAttribute("aria-checked", String(on));
+    }
+
+    /* ---------- theme ---------- */
 
     function getSavedTheme() {
       try {
@@ -659,6 +1229,8 @@
       applyTheme(nextTheme);
     });
 
+    /* ---------- settings panel ---------- */
+
     function openSettings() {
       overlay.classList.add("open");
       settingsPanel.classList.add("open");
@@ -690,34 +1262,110 @@
       }
     });
 
-    // Placeholder: the search engine is not integrated yet.
-    function performSearch(query) {
-      const cleanedQuery = query.trim();
-
-      if (!cleanedQuery) {
-        searchInput.focus();
-        return;
-      }
-
-      status.textContent =
-        "Search is not connected yet - the search engine " +
-        "will be integrated here.";
+    function applyDeveloper() {
+      body.classList.toggle("dev-on", settings.developer);
+      applySwitch(devToggle, settings.developer);
     }
 
-    searchForm.addEventListener("submit", (event) => {
-      event.preventDefault();
-      performSearch(searchInput.value);
+    devToggle.addEventListener("click", () => {
+      settings.developer = !settings.developer;
+      applyDeveloper();
+      saveSettings();
     });
 
-    // Mode switcher: toggles between the crawl and search views.
-    // The engine hooks up to these views later.
+    /* ---------- settings inputs ---------- */
 
-    const modeSwitch = document.getElementById("modeSwitch");
-    const segButtons = modeSwitch.querySelectorAll(".seg-button");
+    const limitInput = document.getElementById("limitInput");
+    const searchDbInput = document.getElementById("searchDbInput");
+    const maxPagesInput = document.getElementById("maxPagesInput");
+    const allowInput = document.getElementById("allowInput");
+    const crawlDbInput = document.getElementById("crawlDbInput");
+    const delayInput = document.getElementById("delayInput");
+    const maxBytesInput = document.getElementById("maxBytesInput");
+    const threadsInput = document.getElementById("threadsInput");
 
-    const crawlForm = document.getElementById("crawlForm");
-    const crawlInput = document.getElementById("crawlInput");
-    const crawlStatus = document.getElementById("crawlStatus");
+    function bindText(input, obj, key) {
+      input.value = obj[key];
+
+      input.addEventListener("input", () => {
+        obj[key] = input.value;
+        saveSettings();
+      });
+    }
+
+    bindText(limitInput, settings.search, "limit");
+    bindText(searchDbInput, settings.search, "db");
+    bindText(maxPagesInput, settings.crawl, "max_pages");
+    bindText(allowInput, settings.crawl, "allow");
+    bindText(crawlDbInput, settings.crawl, "db");
+    bindText(delayInput, settings.crawl, "delay");
+    bindText(maxBytesInput, settings.crawl, "max_bytes");
+    bindText(threadsInput, settings.crawl, "threads");
+
+    /* Phrase Search (--es) vs Exact match (--e):
+       only one may be active at a time. Exact match wins while it
+       is on; the Phrase Search checkbox is disabled meanwhile. */
+
+    function applyPhraseAvailability() {
+      const exactOn = settings.search.exact;
+
+      phraseToggle.disabled = exactOn;
+      phraseToggle.checked = exactOn ? false : settings.phrase;
+      applySwitch(exactSwitch, exactOn);
+    }
+
+    phraseToggle.addEventListener("change", () => {
+      settings.phrase = phraseToggle.checked;
+
+      if (settings.phrase && settings.search.exact) {
+        settings.search.exact = false;
+        applyPhraseAvailability();
+      }
+
+      saveSettings();
+    });
+
+    exactSwitch.addEventListener("click", () => {
+      settings.search.exact = !settings.search.exact;
+      applyPhraseAvailability();
+      saveSettings();
+    });
+
+    /* Sitemap mode: --no-sitemap and --only-sitemap are mutually
+       exclusive; both off means the engine default ("auto"). */
+
+    function applySitemap() {
+      applySwitch(
+        noSitemapSwitch,
+        settings.crawl.sitemap === "skip"
+      );
+      applySwitch(
+        onlySitemapSwitch,
+        settings.crawl.sitemap === "only"
+      );
+    }
+
+    noSitemapSwitch.addEventListener("click", () => {
+      settings.crawl.sitemap =
+        settings.crawl.sitemap === "skip" ? "auto" : "skip";
+      applySitemap();
+      saveSettings();
+    });
+
+    onlySitemapSwitch.addEventListener("click", () => {
+      settings.crawl.sitemap =
+        settings.crawl.sitemap === "only" ? "auto" : "only";
+      applySitemap();
+      saveSettings();
+    });
+
+    function applySettingsUI() {
+      applyDeveloper();
+      applyPhraseAvailability();
+      applySitemap();
+    }
+
+    /* ---------- mode switcher ---------- */
 
     const views = {
       crawl: document.getElementById("crawlView"),
@@ -737,6 +1385,10 @@
       for (const [name, view] of Object.entries(views)) {
         view.hidden = name !== mode;
       }
+
+      // The settings panel shows the active mode's settings.
+      searchSettings.hidden = mode !== "search";
+      crawlSettings.hidden = mode !== "crawl";
 
       try {
         localStorage.setItem("ardv-mode", mode);
@@ -765,21 +1417,457 @@
       });
     });
 
-    // Placeholder: the crawler is not integrated yet.
-    crawlForm.addEventListener("submit", (event) => {
-      event.preventDefault();
+    applySettingsUI();
 
-      const cleanedQuery = crawlInput.value.trim();
+    /* ---------- search: API call + rendering ---------- */
+
+    let searchController = null;
+
+    function safeLink(href, className, text) {
+      const a = document.createElement("a");
+      a.className = className;
+
+      // Only real web links become anchors; anything else
+      // (javascript:, data:, ...) is rendered as plain text.
+      if (
+        typeof href === "string" &&
+        /^https?:\/\//i.test(href)
+      ) {
+        a.href = href;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+      }
+
+      a.textContent = typeof text === "string" ? text : "";
+      return a;
+    }
+
+    function showSkeleton(target) {
+      target.innerHTML = "";
+
+      const wrap = document.createElement("div");
+      wrap.className = "state-box";
+      wrap.style.textAlign = "left";
+
+      for (let i = 0; i < 3; i++) {
+        const row = document.createElement("div");
+        row.className = "skeleton-row";
+
+        const url = document.createElement("div");
+        url.className = "skeleton-bar url";
+        const title = document.createElement("div");
+        title.className = "skeleton-bar title";
+        const snip1 = document.createElement("div");
+        snip1.className = "skeleton-bar w-80";
+        const snip2 = document.createElement("div");
+        snip2.className = "skeleton-bar w-60";
+
+        row.append(url, title, snip1, snip2);
+        wrap.appendChild(row);
+      }
+
+      target.appendChild(wrap);
+    }
+
+    function renderResults(data) {
+      results.innerHTML = "";
+
+      const hasMeta =
+        typeof data.total_results === "number" &&
+        Number.isFinite(data.total_results) &&
+        typeof data.search_time === "number" &&
+        Number.isFinite(data.search_time);
+
+      if (hasMeta) {
+        const meta = document.createElement("div");
+        meta.className = "results-meta";
+        meta.textContent =
+          `${data.total_results} result` +
+          `${data.total_results === 1 ? "" : "s"}` +
+          ` (${data.search_time.toFixed(3)} seconds)`;
+        results.appendChild(meta);
+      }
+
+      const list = Array.isArray(data.results) ? data.results : [];
+
+      if (list.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "state-box";
+
+        const title = document.createElement("p");
+        title.className = "state-title";
+        title.textContent = `No results for "${data.query ?? searchInput.value.trim()}".`;
+
+        const hint = document.createElement("p");
+        hint.textContent =
+          "Try different keywords, or check the database path in settings.";
+
+        empty.append(title, hint);
+        results.appendChild(empty);
+        return;
+      }
+
+      for (const item of list) {
+        const row = document.createElement("div");
+        row.className = "result";
+
+        const href = typeof item.url === "string" ? item.url : "";
+
+        if (href) {
+          row.appendChild(
+            safeLink(href, "result-url", href)
+          );
+        }
+
+        row.appendChild(
+          safeLink(
+            href,
+            "result-title",
+            typeof item.title === "string" && item.title.trim()
+              ? item.title
+              : "Untitled"
+          )
+        );
+
+        const snippet = document.createElement("p");
+        snippet.className = "result-snippet";
+        snippet.textContent =
+          typeof item.snippet === "string" ? item.snippet : "";
+
+        row.appendChild(snippet);
+        results.appendChild(row);
+      }
+    }
+
+    const ERROR_ICON =
+      "M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94" +
+      "a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z";
+
+    function renderState(target, title, message) {
+      target.innerHTML = "";
+
+      const box = document.createElement("div");
+      box.className = "state-box";
+
+      const icon = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "svg"
+      );
+      icon.setAttribute("viewBox", "0 0 24 24");
+      icon.setAttribute("fill", "none");
+      icon.setAttribute("stroke", "currentColor");
+      icon.setAttribute("stroke-width", "1.8");
+      icon.setAttribute("stroke-linecap", "round");
+      icon.setAttribute("aria-hidden", "true");
+
+      const path = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "path"
+      );
+      path.setAttribute("d", ERROR_ICON);
+      icon.appendChild(path);
+
+      const heading = document.createElement("p");
+      heading.className = "state-title";
+      heading.textContent = title;
+
+      const detail = document.createElement("p");
+      detail.textContent = message;
+
+      box.append(icon, heading, detail);
+      target.appendChild(box);
+    }
+
+    function setSearchLoading(loading, query) {
+      searchButton.disabled = loading;
+      searchButton.textContent = loading ? "Searching…" : "Search";
+
+      status.textContent = loading
+        ? `Searching for "${query}"…`
+        : "";
+    }
+
+    async function performSearch(query, options = {}) {
+      const cleanedQuery = query.trim();
 
       if (!cleanedQuery) {
+        searchInput.focus();
+        return;
+      }
+
+      if (options.push !== false) {
+        syncQueryUrl(cleanedQuery);
+      }
+
+      document.title = `${cleanedQuery} — ARDV Search`;
+
+      // A newer search supersedes the one in flight.
+      searchController?.abort();
+      const controller = new AbortController();
+      searchController = controller;
+
+      setSearchLoading(true, cleanedQuery);
+      showSkeleton(results);
+
+      const params = new URLSearchParams();
+      params.set("q", cleanedQuery);
+
+      const limit = parsePositiveInt(settings.search.limit);
+
+      if (limit !== null) {
+        params.set("limit", String(limit));
+      }
+
+      // --e and --es are mutually exclusive; Exact match wins.
+      const exact = settings.search.exact;
+      params.set("exact", exact ? "1" : "0");
+      params.set("stem", exact || settings.phrase ? "1" : "0");
+
+      if (settings.search.db) {
+        params.set("db", settings.search.db);
+      }
+
+      try {
+        const response = await fetch(
+          `${API_SEARCH}?${params.toString()}`,
+          {
+            headers: { Accept: "application/json" },
+            signal: controller.signal
+          }
+        );
+
+        let data = null;
+
+        try {
+          data = await response.json();
+        } catch {
+          throw new Error(
+            `The API returned an invalid response (HTTP ${response.status}).`
+          );
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            (data && data.error) ||
+              `Search failed (HTTP ${response.status}).`
+          );
+        }
+
+        if (searchController !== controller) return;
+        renderResults(data);
+      } catch (err) {
+        if (err.name === "AbortError") return;
+        if (searchController !== controller) return;
+
+        const message =
+          err instanceof TypeError
+            ? "Could not reach the search API. Start the " +
+              "backend with: python -m flask --app app run"
+            : err.message;
+
+        renderState(results, "Search failed", message);
+      }
+
+      if (searchController === controller) {
+        setSearchLoading(false, cleanedQuery);
+      }
+    }
+
+    function syncQueryUrl(query) {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set("q", query);
+
+        if (url.href !== window.location.href) {
+          window.history.pushState({ q: query }, "", url);
+        }
+      } catch {
+        // URL syncing is unavailable in this context (e.g. some
+        // file:// setups); the search itself is unaffected.
+      }
+    }
+
+    function queryFromUrl() {
+      try {
+        return new URLSearchParams(window.location.search).get("q");
+      } catch {
+        return null;
+      }
+    }
+
+    searchForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      performSearch(searchInput.value);
+    });
+
+    window.addEventListener("popstate", () => {
+      const q = queryFromUrl();
+
+      if (q) {
+        searchInput.value = q;
+        performSearch(q, { push: false });
+      } else {
+        searchInput.value = "";
+        status.textContent = "";
+        results.innerHTML = "";
+        document.title = "ARDV Search";
+      }
+    });
+
+    /* ---------- crawl: API call + rendering ---------- */
+
+    function setCrawlLoading(loading, url) {
+      crawlButton.disabled = loading;
+      crawlButton.textContent = loading ? "Crawling…" : "Crawl";
+
+      crawlStatus.textContent = loading
+        ? `Crawling ${url} — this can take a while.`
+        : "";
+    }
+
+    function humanizeKey(key) {
+      return String(key).replace(/_/g, " ");
+    }
+
+    function renderCrawlStats(stats) {
+      crawlResults.innerHTML = "";
+
+      if (
+        !stats ||
+        typeof stats !== "object" ||
+        Array.isArray(stats)
+      ) {
+        crawlStatus.textContent = "Crawl finished.";
+        return;
+      }
+
+      const meta = document.createElement("div");
+      meta.className = "results-meta";
+      meta.textContent = "Crawl finished.";
+      crawlResults.appendChild(meta);
+
+      const list = document.createElement("dl");
+      list.className = "stats-list";
+
+      for (const [key, value] of Object.entries(stats)) {
+        let display = null;
+
+        if (
+          typeof value === "string" ||
+          typeof value === "number" ||
+          typeof value === "boolean"
+        ) {
+          display =
+            typeof value === "boolean"
+              ? value ? "yes" : "no"
+              : String(value);
+        } else if (Array.isArray(value) && value.length > 0) {
+          display = `${value.length} item${value.length === 1 ? "" : "s"}`;
+        }
+
+        if (display === null) continue;
+
+        if (display.length > 160) {
+          display = display.slice(0, 160) + "…";
+        }
+
+        const dt = document.createElement("dt");
+        dt.textContent = humanizeKey(key);
+
+        const dd = document.createElement("dd");
+        dd.textContent = display;
+
+        list.append(dt, dd);
+      }
+
+      if (list.children.length > 0) {
+        crawlResults.appendChild(list);
+      }
+    }
+
+    crawlForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      let url = crawlInput.value.trim();
+
+      if (!url) {
         crawlInput.focus();
         return;
       }
 
-      crawlStatus.textContent =
-        "Crawling is not connected yet - the crawler " +
-        "will be integrated here.";
+      if (!/^https?:\/\//i.test(url)) {
+        url = "https://" + url;
+      }
+
+      setCrawlLoading(true, url);
+      crawlResults.innerHTML = "";
+
+      const c = settings.crawl;
+      const allow = c.allow
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+
+      const payload = {
+        url,
+        max_pages: parsePositiveInt(c.max_pages),
+        delay: parseNonNegativeFloat(c.delay),
+        max_bytes: parsePositiveInt(c.max_bytes),
+        threads: parsePositiveInt(c.threads),
+        allow,
+        sitemap: c.sitemap,
+        db: c.db
+      };
+
+      try {
+        const response = await fetch(API_CRAWL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+
+        let data = null;
+
+        try {
+          data = await response.json();
+        } catch {
+          throw new Error(
+            `The API returned an invalid response (HTTP ${response.status}).`
+          );
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            (data && data.error) ||
+              `Crawl failed (HTTP ${response.status}).`
+          );
+        }
+
+        renderCrawlStats(data);
+      } catch (err) {
+        const message =
+          err instanceof TypeError
+            ? "Could not reach the crawl API. Start the " +
+              "backend with: python -m flask --app app run"
+            : err.message;
+
+        renderState(crawlResults, "Crawl failed", message);
+      }
+
+      setCrawlLoading(false, url);
     });
+
+    /* ---------- restore state from the URL ---------- */
+
+    const initialQuery = queryFromUrl();
+
+    if (initialQuery) {
+      searchInput.value = initialQuery;
+      performSearch(initialQuery, { push: false });
+    }
   </script>
 </body>
 </html>

@@ -6,7 +6,7 @@ a local SQLite database, and lets you search them from the command line — no e
 services, no API keys, no data leaving your machine.
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-237%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-276%20passing-brightgreen)
 
 ## Key Features
 
@@ -189,9 +189,68 @@ python main.py search "interesting topic" --limit 25
   independent of the directory you run from. WAL mode lets searches run while a crawl
   is writing.
 
+## Web API (Flask)
+
+The engine itself is independent of Flask — `main.search_json()` returns a
+consistent JSON payload and can be called directly from any Python code:
+
+```python
+import main
+main.search_json("python", limit=5)  # {"query", "results", "total_results", "search_time"}
+```
+
+`app.py` is a thin HTTP adapter around it:
+
+- `GET /api/search?q=<query>[&limit=N][&exact=1][&stem=1][&db=FILE]`
+  → search JSON. When provided, `limit` must be an integer ≥ 1 (else 400);
+  `exact` and `stem` are mutually exclusive (else 400); a blank `q`
+  returns an empty result set. A missing database → 404
+  `{"error": "database not found", "database": ...}`. Other failures
+  → 500 with a logged traceback.
+- `POST /api/crawl` — **asynchronous**. Body is a JSON object mirroring
+  the crawl options: `{"start_url": ..., "max_pages": ..., "delay": ...,
+  "max_bytes": ..., "threads": ..., "allow": [...], "sitemap":
+  "auto"|"skip"|"only", "db": ...}` (`start_url` required; `url`
+  accepted as an alias; omitted/null = engine default). The config is
+  validated up front (400 with `{"error": ...}` on bad input, no job
+  created), then a crawl job is started in the background and the
+  endpoint responds immediately with
+  `202 {"crawl_id": "<8-hex-chars>", "status": "running"}`. Multiple
+  crawls can run concurrently. `main.crawl_json()` is the underlying
+  programmatic entry point (usable without Flask).
+- `GET /api/crawl/status/<crawl_id>` — poll roughly every second for
+  live status: `{"crawl_id", "status": "running"|"completed"|"failed",
+  "stats": {...live/final stats...}, "error": null | "<concise
+  message>", "started_at", "finished_at"}`. Unknown id → 404. While
+  `running`, `stats` is a live snapshot (`indexed`, `requests`,
+  `links_discovered`, `queued`, `errors`, …); when `completed` it is
+  final; when `failed`, `error` holds a one-line message to display.
+- `GET /api/status` → `{"status": "ok", "engine": "ModelSearchEngine",
+  "database": ..., "database_exists": ...}`.
+- `GET /` → the UI shell `templates/index.html`.
+
+Start it (from the repo root):
+
+```bash
+.venv\Scripts\flask.exe --app app run   # dev server, 127.0.0.1:5000
+# or: .venv\Scripts\python.exe app.py
+```
+
+```bash
+curl "http://127.0.0.1:5000/api/search?q=python&limit=5"
+curl "http://127.0.0.1:5000/api/status"
+curl -X POST -H "Content-Type: application/json" -d '{"start_url":"https://quotes.toscrape.com","max_pages":100,"threads":8,"delay":0.5}' http://127.0.0.1:5000/api/crawl
+# -> {"crawl_id":"c83f91a2","status":"running"}
+curl "http://127.0.0.1:5000/api/crawl/status/c83f91a2"
+```
+
+Each request opens its own SQLite connection (WAL mode) — searches can run
+while the crawler writes to the same database.
+
 ## Running the Tests (Running or not running tests doesnt effect app functionality; skip if not interested.)
 
-237 tests run on the standard library's `unittest` against a local HTTP server —
+276 tests run on the standard library's `unittest` against a local HTTP server —
+the 39 newest are the Flask/JSON API tests (stages 18-19), which use Flask's test client, so no server process needs to be started for them.
 **no external network access is needed**:
 
 ```bash
@@ -205,6 +264,8 @@ python tests/verify_ctrlc.py              # real-signal Ctrl+C verification
 
 ```
 main.py            crawler + search engine + CLI (single file)
+app.py            Flask web API (thin adapter over main.search_json)
+templates/        UI shell (index.html) served by app.py
 requirements.txt   pinned dependencies
 tests/             unit tests, CLI smoke test, Ctrl+C verification script
 ```
