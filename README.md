@@ -6,7 +6,7 @@ a local SQLite database, and lets you search them from the command line — no e
 services, no API keys, no data leaving your machine.
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-276%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-283%20passing-brightgreen)
 
 ## Key Features
 
@@ -35,9 +35,9 @@ services, no API keys, no data leaving your machine.
 
 ## Setup (For Windows)
 
-- Search and open 'powershell"
+- Search and open "powershell"
 
-- Run the command `winget install git` and continue with the installation. This installs git for easier setup.
+- Run the command `winget install --id Git.Git -e --source winget` and continue with the installation. This installs git for easier setup.
 
 - Open your desired directory(folder) in which you want the program to be installed.
 
@@ -68,7 +68,7 @@ python -m pip install -r requirements.txt
 
 - Open powershell again 
 
-- Run the command `winget uninstall git`, this uninstalls git if you have no further use of it.
+- Run the command `winget uninstall --id Git.Git`, this uninstalls git if you have no further use of it.
 
 - The setup is complete! To run the program open the folder named "ARDV-Search" and open cmd inside the folder from the address bar as done before.
 
@@ -85,7 +85,7 @@ This is entirely optional — if `.env` is missing, unreadable, or `CONTACT_EMAI
 left empty, the crawler simply identifies itself as `ModelSearchEngine (educational
 crawler)` with no contact section. 
 
-## Usage
+## Usage (CLI)
 
 Open cmd from the address bar inside the folder to run these commands.
 
@@ -119,6 +119,13 @@ Results for: life
      quote about [life] with ...
 ```
 
+## Usage (WEB)
+
+- Open cmd from the address bar again and run the command `py app.py`
+- Open 127.0.0.1:5000 in any web browser.
+
+- The arguments in the cli are present as settings options in the web version, enable developer settings for the complete list.
+
 ### Common recipes
 
 ```bash
@@ -144,6 +151,7 @@ python main.py search "interesting topic" --limit 25
 
 ### Command reference
 
+**Crawl:**
 **`python main.py crawl <url> [options]`**
 
 | Option | Default | Description |
@@ -158,6 +166,7 @@ python main.py search "interesting topic" --limit 25
 | `--only-sitemap` | off / html + sitemap based discovery | Crawl only from sitemap URLs (no HTML link discovery); aborts with a message if no sitemap is found |
 | `--db FILE` | `result.db` | Database file for this crawl; relative paths are anchored next to main.py |
 
+**Search:**
 **`python main.py search <query> [options]`**
 
 | Option | Default | Description |
@@ -189,7 +198,7 @@ python main.py search "interesting topic" --limit 25
   independent of the directory you run from. WAL mode lets searches run while a crawl
   is writing.
 
-## Web API (Flask)
+## Web API (Flask) **INCOMPLETE**
 
 The engine itself is independent of Flask — `main.search_json()` returns a
 consistent JSON payload and can be called directly from any Python code:
@@ -219,12 +228,25 @@ main.search_json("python", limit=5)  # {"query", "results", "total_results", "se
   crawls can run concurrently. `main.crawl_json()` is the underlying
   programmatic entry point (usable without Flask).
 - `GET /api/crawl/status/<crawl_id>` — poll roughly every second for
-  live status: `{"crawl_id", "status": "running"|"completed"|"failed",
-  "stats": {...live/final stats...}, "error": null | "<concise
+  live status: `{"crawl_id", "status": "running"|"completed"|"stopped"
+  |"failed", "stats": {...live/final stats...}, "error": null | "<concise
   message>", "started_at", "finished_at"}`. Unknown id → 404. While
   `running`, `stats` is a live snapshot (`indexed`, `requests`,
   `links_discovered`, `queued`, `errors`, …); when `completed` it is
-  final; when `failed`, `error` holds a one-line message to display.
+  final; when `stopped`, the crawl was stopped early via the stop
+  endpoint and `stats` carries `"interrupted": true`; when `failed`,
+  `error` holds a one-line message to display.
+  Before the crawl worker starts reporting, `stats` is `{"stage":
+  "discovering_sitemaps"}` (or `{"stage": "crawling"}` in skip mode);
+  after that, every snapshot carries `"stage": "crawling"` too. The
+  endpoint returns a consistent snapshot taken under the job lock.
+- `POST /api/crawl/stop/<crawl_id>` — requests a graceful stop of a
+  running crawl. It sets the job's stop event (the same shared stop path
+  as Ctrl+C in `main.py`): in-flight fetches finish, queued work is
+  cancelled, and the job ends with status `"stopped"` and stats
+  `"interrupted": true`. Responses with the current job snapshot (same
+  shape as the status endpoint); stopping a non-running job is a no-op
+  that returns its current state; unknown id → 404.
 - `GET /api/status` → `{"status": "ok", "engine": "ModelSearchEngine",
   "database": ..., "database_exists": ...}`.
 - `GET /` → the UI shell `templates/index.html`.
@@ -242,6 +264,10 @@ curl "http://127.0.0.1:5000/api/status"
 curl -X POST -H "Content-Type: application/json" -d '{"start_url":"https://quotes.toscrape.com","max_pages":100,"threads":8,"delay":0.5}' http://127.0.0.1:5000/api/crawl
 # -> {"crawl_id":"c83f91a2","status":"running"}
 curl "http://127.0.0.1:5000/api/crawl/status/c83f91a2"
+curl -X POST "http://127.0.0.1:5000/api/crawl/stop/c83f91a2"
+# -> {"crawl_id":"c83f91a2","status":"running", ...}
+curl "http://127.0.0.1:5000/api/crawl/status/c83f91a2"
+# -> when stopped: {"crawl_id":"c83f91a2","status":"stopped","stats":{...,"interrupted":true}, ...}
 ```
 
 Each request opens its own SQLite connection (WAL mode) — searches can run
@@ -249,8 +275,8 @@ while the crawler writes to the same database.
 
 ## Running the Tests (Running or not running tests doesnt effect app functionality; skip if not interested.)
 
-276 tests run on the standard library's `unittest` against a local HTTP server —
-the 39 newest are the Flask/JSON API tests (stages 18-19), which use Flask's test client, so no server process needs to be started for them.
+283 tests run on the standard library's `unittest` against a local HTTP server —
+the 44 newest are the Flask/JSON API tests (stages 18-19), which use Flask's test client, so no server process needs to be started for them.
 **no external network access is needed**:
 
 ```bash
@@ -281,7 +307,8 @@ tests/             unit tests, CLI smoke test, Ctrl+C verification script
 - The default search functionality (Without --e or --es) splits phrases into words and searches those words, for proper phrase searches use --e or --es refer [Command ref.](#command-reference) for description.
 - The [releases](https://github.com/aGlass78/ARDV-Search/releases) section includes a pre-indexed database of 15k wikipedia pages available to download and use directly without having to crawl first. To use download the `wiki15k.db` file, place it in your copied repo, and rename it to `result.db` then run the search function and it will search that file.
 
-## Known limitations / Future features
+## Known limitations / Future fixes
 
 - Currently the crawler cant parse compressed sitemaps (.xml.gz files)
 - **Stemming Limitations** - The implemented porter algorithm for stemming can create issues like splitting the word studies into studi and es which is incorrect.
+- Running multiple crawl sessions on the same database simultaneously can cause database writing errors because of how SQLite (the database used in this project) handles concurrent writting. 

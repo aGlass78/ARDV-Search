@@ -1356,6 +1356,7 @@ def crawl(
     sitemap="auto",
     db_path=None,
     progress_callback=None,
+    stop_event=None,
 ):
     """Crawl concurrently; max_pages=None means unlimited.
 
@@ -1373,6 +1374,13 @@ def crawl(
     snapshot of the current stats dict. The callback runs on a
     background thread and must not block for long; exceptions raised
     by it are swallowed so a broken callback never breaks the crawl.
+
+    `stop_event`, when given, is a threading.Event. Once set, the
+    crawl stops gracefully - like Ctrl+C - between units of work (the
+    currently in-flight page fetches finish, queued work is cancelled,
+    and `stats["interrupted"]` becomes True). Both the HTTP stop API
+    (app.py) and the CLI's KeyboardInterrupt handler share this stop
+    path.
     """
     start_url = normalize_url(start_url)
     scope = (
@@ -1519,6 +1527,11 @@ def crawl(
 
     saved = 0
     pending_commits = 0
+    # Sitemap discovery has finished by here; from this point the crawl
+    # is in the crawling phase. The stage is included in progress
+    # snapshots so callers (e.g. the Flask job registry) can report
+    # "discovering_sitemaps" before this point and "crawling" after.
+    stats["stage"] = "crawling"
 
     # Optional periodic progress reporting: the callback receives a
     # JSON-safe snapshot of `stats` roughly every PROGRESS_INTERVAL
@@ -1551,8 +1564,31 @@ def crawl(
     )
     pending = {}
 
+    # Single stop path shared by Ctrl+C (keyboard) and the HTTP stop
+    # API (stop_event). Both funnel into _stop_crawl() below; keeping
+    # a flag lets the message distinguish the requester.
+    stop_requested = False
+
+    def _stop_crawl(requested=False):
+        """Stop the crawl early but keep everything fetched so far.
+
+        Queued work is cancelled; requests already in flight are
+        allowed to finish (bounded by the 20s timeout) so the
+        database stays consistent. The stats below still describe
+        everything processed before the stop.
+        """
+        stats["interrupted"] = True
+        print()
+        if requested:
+            print("Interrupted (stop requested) - stopping the crawl early...")
+        else:
+            print("Interrupted (Ctrl+C) - stopping the crawl early...")
+
     try:
         while queue or pending:
+            if stop_event is not None and stop_event.is_set():
+                stop_requested = True
+                raise KeyboardInterrupt
             while queue and len(pending) < threads:
                 if (
                     max_pages is not None
@@ -1781,14 +1817,7 @@ def crawl(
                 print(f"    Active workers: {len(pending)}")
 
     except KeyboardInterrupt:
-        # Ctrl+C: stop indexing but keep everything fetched so far.
-        # Queued work is cancelled; requests already in flight are
-        # allowed to finish (bounded by the 20s timeout) so the
-        # database stays consistent. The stats below still describe
-        # everything processed before the interrupt.
-        stats["interrupted"] = True
-        print()
-        print("Interrupted (Ctrl+C) - stopping the crawl early...")
+        _stop_crawl(stop_requested)
 
     finally:
         for future in pending:
@@ -1940,7 +1969,7 @@ def _normalize_crawl_args(url, max_pages=None, delay=None, max_bytes=None,
 
 def crawl_json(url, max_pages=None, delay=None, max_bytes=None,
                threads=None, allow=None, sitemap=None, db=None,
-               progress_callback=None):
+               progress_callback=None, stop_event=None):
     """Run a crawl and return the JSON-compatible stats dictionary.
 
     Programmatic twin of crawl() for web frontends / the Flask API.
@@ -1966,6 +1995,10 @@ def crawl_json(url, max_pages=None, delay=None, max_bytes=None,
         resolve_db_path for anchoring/.db rules.
       - ``progress_callback``: passed straight through to crawl(); see
         its docstring. This is how the web API streams live stats.
+      - ``stop_event``: passed straight through to crawl() - a
+        threading.Event; once set, the crawl stops gracefully between
+        units of work (same shared stop path as Ctrl+C). This is how
+        the web API stops a running crawl.
     """
     normalized = _normalize_crawl_args(
         url,
@@ -1987,6 +2020,7 @@ def crawl_json(url, max_pages=None, delay=None, max_bytes=None,
         sitemap=normalized["sitemap"],
         db_path=normalized["db"],
         progress_callback=progress_callback,
+        stop_event=stop_event,
     )
     if result is None:
         # crawl() only returns None when validation failed; everything

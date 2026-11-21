@@ -458,6 +458,61 @@
       overflow-wrap: anywhere;
     }
 
+    /* Crawl progress bar + stop button */
+
+    .crawl-progress {
+      margin-top: 18px;
+      text-align: left;
+    }
+
+    .crawl-progress-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .crawl-progress-label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .progress-track {
+      height: 10px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--button-bg);
+      border-radius: 999px;
+      transition: width .4s ease;
+    }
+
+    .stop-button {
+      padding: 8px 16px;
+      font-size: 13px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--text);
+      transition: background .2s, color .2s;
+    }
+
+    .stop-button:hover {
+      background: var(--hover);
+    }
+
+    .stop-button:disabled {
+      opacity: .55;
+      cursor: default;
+    }
+
     /* Settings panel */
 
     .overlay {
@@ -850,6 +905,32 @@
         Enter a starting URL and press Enter.
       </p>
 
+      <div class="crawl-progress" id="crawlProgress" hidden>
+        <div class="crawl-progress-head">
+          <span class="crawl-progress-label" id="crawlProgressLabel"></span>
+
+          <button
+            class="stop-button"
+            id="stopCrawlButton"
+            type="button"
+            hidden
+          >
+            Stop crawling
+          </button>
+        </div>
+
+        <div
+          class="progress-track"
+          id="crawlProgressTrack"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        >
+          <div class="progress-fill" id="crawlProgressFill"></div>
+        </div>
+      </div>
+
       <div class="status" id="crawlStatus" aria-live="polite"></div>
 
       <div class="results" id="crawlResults" aria-live="polite"></div>
@@ -1044,7 +1125,7 @@
                   (400 invalid limit, 404 database not found,
                    500 internal — see app.py)
 
-       POST /api/crawl   (JSON body; endpoint to be added in app.py)
+       POST /api/crawl   (JSON body)
          { "url": str,                 // required, seed URL
            "max_pages": int | null,    // --max-pages
            "delay": float | null,      // --delay
@@ -1054,16 +1135,32 @@
            "sitemap": "auto" | "skip" | "only",      // --no-sitemap /
                                                      // --only-sitemap
            "db": str }                 // --db
-         200 -> crawl stats object (free-form); primitive fields are
-                rendered as a summary list.
+         202 -> { "crawl_id": str, "status": "running" }
          error -> non-200 with { "error": "message" }
 
+       GET /api/crawl/status/<crawl_id>
+         { "crawl_id": str,
+           "status": "running" | "completed" | "stopped" | "failed",
+           "stats": { ...current crawl stats dict... },
+           "error": str | null,
+           "started_at": number,       // unix seconds
+           "finished_at": number | null }
+         Unknown crawl_id -> 404 { "error": "crawl not found" }.
+
+       POST /api/crawl/stop/<crawl_id>
+         Requests a graceful stop (same shared stop path as Ctrl+C);
+         returns the current job snapshot (same shape as status).
+         Unknown crawl_id -> 404 { "error": "crawl not found" }.
+
        The search endpoint mirrors main.search_json(); the crawl
-       endpoint mirrors main.crawl().
+       endpoint mirrors main.crawl_json() (stats keys: indexed,
+       queued, max_pages, requests, errors, stage, ...).
        ============================================================ */
 
     const API_SEARCH = "/api/search";
     const API_CRAWL = "/api/crawl";
+    const API_CRAWL_STATUS = "/api/crawl/status/";
+    const API_CRAWL_STOP = "/api/crawl/stop/";
 
     const body = document.body;
     const themeToggle = document.getElementById("themeToggle");
@@ -1090,6 +1187,11 @@
     const crawlButton = document.getElementById("crawlButton");
     const crawlStatus = document.getElementById("crawlStatus");
     const crawlResults = document.getElementById("crawlResults");
+    const crawlProgress = document.getElementById("crawlProgress");
+    const crawlProgressLabel = document.getElementById("crawlProgressLabel");
+    const crawlProgressTrack = document.getElementById("crawlProgressTrack");
+    const crawlProgressFill = document.getElementById("crawlProgressFill");
+    const stopCrawlButton = document.getElementById("stopCrawlButton");
 
     const phraseToggle = document.getElementById("phraseToggle");
 
@@ -1716,6 +1818,10 @@
 
     /* ---------- crawl: API call + rendering ---------- */
 
+    let crawlPollTimer = null;
+    let activeCrawlId = null;
+    let crawlStopRequested = false;
+
     function setCrawlLoading(loading, url) {
       crawlButton.disabled = loading;
       crawlButton.textContent = loading ? "Crawling…" : "Crawl";
@@ -1729,7 +1835,7 @@
       return String(key).replace(/_/g, " ");
     }
 
-    function renderCrawlStats(stats) {
+    function renderCrawlStats(stats, metaText) {
       crawlResults.innerHTML = "";
 
       if (
@@ -1737,13 +1843,13 @@
         typeof stats !== "object" ||
         Array.isArray(stats)
       ) {
-        crawlStatus.textContent = "Crawl finished.";
+        crawlStatus.textContent = metaText || "Crawl finished.";
         return;
       }
 
       const meta = document.createElement("div");
       meta.className = "results-meta";
-      meta.textContent = "Crawl finished.";
+      meta.textContent = metaText || "Crawl finished.";
       crawlResults.appendChild(meta);
 
       const list = document.createElement("dl");
@@ -1785,6 +1891,168 @@
       }
     }
 
+    function resetCrawlPolling() {
+      if (crawlPollTimer !== null) {
+        clearInterval(crawlPollTimer);
+        crawlPollTimer = null;
+      }
+      activeCrawlId = null;
+      crawlStopRequested = false;
+      stopCrawlButton.hidden = true;
+      stopCrawlButton.disabled = false;
+      stopCrawlButton.textContent = "Stop crawling";
+      crawlProgress.hidden = true;
+      crawlProgressFill.style.width = "0%";
+      crawlProgressTrack.setAttribute("aria-valuenow", "0");
+    }
+
+    function updateCrawlProgress(stats) {
+      const s = stats || {};
+      const indexed = Number.isFinite(s.indexed) ? s.indexed : 0;
+      const hasMax =
+        Number.isFinite(s.max_pages) && s.max_pages > 0;
+      const max = hasMax
+        ? s.max_pages
+        : (Number.isFinite(s.queued) && s.queued > 0 ? s.queued : 0);
+      const pct = max > 0
+        ? Math.min(100, Math.round((indexed / max) * 100))
+        : 0;
+
+      crawlProgressFill.style.width = pct + "%";
+      crawlProgressTrack.setAttribute("aria-valuenow", String(pct));
+      crawlProgressTrack.setAttribute("aria-valuemax", String(max));
+
+      let label = `${indexed} / ${max} pages indexed`;
+      if (typeof s.stage === "string" && s.stage) {
+        label += ` · ${humanizeKey(s.stage)}`;
+      }
+      crawlProgressLabel.textContent = label;
+    }
+
+    function finishCrawlPolling(snapshot) {
+      if (crawlPollTimer !== null) {
+        clearInterval(crawlPollTimer);
+        crawlPollTimer = null;
+      }
+      activeCrawlId = null;
+      crawlStopRequested = false;
+      stopCrawlButton.hidden = true;
+      stopCrawlButton.disabled = false;
+      stopCrawlButton.textContent = "Stop crawling";
+      crawlProgress.hidden = true;
+
+      if (!snapshot || snapshot.status === "failed") {
+        const message =
+          (snapshot && snapshot.error) || "Crawl failed.";
+        renderState(crawlResults, "Crawl failed", message);
+        crawlStatus.textContent = "Crawl failed.";
+        setCrawlLoading(false);
+        return;
+      }
+
+      const interrupted = !!(snapshot.stats && snapshot.stats.interrupted);
+      const meta =
+        snapshot.status === "stopped" || interrupted
+          ? "Crawl stopped."
+          : "Crawl finished.";
+      renderCrawlStats(snapshot.stats, meta);
+      crawlStatus.textContent = meta;
+      setCrawlLoading(false);
+    }
+
+    async function pollCrawlStatus() {
+      const id = activeCrawlId;
+      if (!id) return;
+
+      try {
+        const response = await fetch(
+          API_CRAWL_STATUS + encodeURIComponent(id),
+          { headers: { Accept: "application/json" } }
+        );
+
+        let snapshot = null;
+        try {
+          snapshot = await response.json();
+        } catch {
+          snapshot = null;
+        }
+
+        if (!response.ok) {
+          finishCrawlPolling({
+            status: "failed",
+            error:
+              (snapshot && snapshot.error) ||
+              `Status check failed (HTTP ${response.status}).`
+          });
+          return;
+        }
+
+        if (!snapshot || typeof snapshot.status !== "string") {
+          finishCrawlPolling({
+            status: "failed",
+            error: "The crawl API returned an invalid status response."
+          });
+          return;
+        }
+
+        updateCrawlProgress(snapshot.stats);
+        renderCrawlStats(snapshot.stats, "Crawling…");
+
+        if (snapshot.status === "running") {
+          stopCrawlButton.hidden = false;
+          stopCrawlButton.disabled = crawlStopRequested;
+        } else {
+          finishCrawlPolling(snapshot);
+        }
+      } catch (err) {
+        finishCrawlPolling({
+          status: "failed",
+          error:
+            err instanceof TypeError
+              ? "Could not reach the crawl API. Start the " +
+                "backend with: python -m flask --app app run"
+              : err.message
+        });
+      }
+    }
+
+    function startCrawlPolling(crawlId) {
+      activeCrawlId = crawlId;
+      crawlStopRequested = false;
+      crawlProgress.hidden = false;
+      stopCrawlButton.hidden = false;
+      stopCrawlButton.disabled = false;
+      stopCrawlButton.textContent = "Stop crawling";
+      pollCrawlStatus();
+      crawlPollTimer = setInterval(pollCrawlStatus, 1000);
+    }
+
+    async function requestCrawlStop() {
+      const id = activeCrawlId;
+      if (!id) return;
+
+      crawlStopRequested = true;
+      stopCrawlButton.disabled = true;
+      stopCrawlButton.textContent = "Stopping…";
+
+      try {
+        await fetch(
+          API_CRAWL_STOP + encodeURIComponent(id),
+          {
+            method: "POST",
+            headers: { Accept: "application/json" }
+          }
+        );
+        // Keep polling; the crawl reaches "stopped" on its own.
+      } catch {
+        crawlStopRequested = false;
+        stopCrawlButton.disabled = false;
+        stopCrawlButton.textContent = "Stop crawling";
+      }
+    }
+
+    stopCrawlButton.addEventListener("click", requestCrawlStop);
+
     crawlForm.addEventListener("submit", async (event) => {
       event.preventDefault();
 
@@ -1799,6 +2067,7 @@
         url = "https://" + url;
       }
 
+      resetCrawlPolling();
       setCrawlLoading(true, url);
       crawlResults.innerHTML = "";
 
@@ -1846,7 +2115,16 @@
           );
         }
 
-        renderCrawlStats(data);
+        if (
+          !data ||
+          typeof data.crawl_id !== "string" ||
+          data.status !== "running"
+        ) {
+          throw new Error("The crawl API returned an unexpected response.");
+        }
+
+        setCrawlLoading(false, url);
+        startCrawlPolling(data.crawl_id);
       } catch (err) {
         const message =
           err instanceof TypeError
@@ -1855,9 +2133,8 @@
             : err.message;
 
         renderState(crawlResults, "Crawl failed", message);
+        setCrawlLoading(false, url);
       }
-
-      setCrawlLoading(false, url);
     });
 
     /* ---------- restore state from the URL ---------- */

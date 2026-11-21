@@ -50,13 +50,26 @@ GET /api/crawl/status/<crawl_id>
 
         {
           "crawl_id": "c83f91a2",
-          "status": "running" | "completed" | "failed",
+          "status": "running" | "completed" | "stopped" | "failed",
           "stats": { ...current crawl stats dict... },
           "error": null | "concise failure message",
           "started_at": <unix seconds>,
           "finished_at": null | <unix seconds>
         }
 
+    "stopped" means the crawl was stopped via POST
+    /api/crawl/stop/<crawl_id> (or Ctrl+C in the CLI); its stats carry
+    "interrupted": true.
+
+    Unknown crawl_id -> 404 {"error": "crawl not found"}.
+
+POST /api/crawl/stop/<crawl_id>
+    Requests a graceful stop of a running crawl. Sets the job's stop
+    event (the same shared stop path as Ctrl+C in main.py); in-flight
+    fetches finish, queued work is cancelled, and the job ends with
+    status "stopped" and stats "interrupted": true. Response is the
+    current job snapshot (same shape as the status endpoint). Stopping
+    a non-running job is a no-op that returns its current state.
     Unknown crawl_id -> 404 {"error": "crawl not found"}.
 
 GET /api/status
@@ -86,6 +99,20 @@ def create_app():
 
     def _error(message, status=400):
         return jsonify(error=message), status
+
+    def _job_snapshot(job):
+        """Consistent, JSON-safe view of a crawl job.
+
+        Reads every serializable field into a plain dict. The stop_event
+        (a threading.Event) is intentionally excluded.
+        """
+        return {
+            "status": job["status"],
+            "stats": dict(job["stats"]),
+            "error": job["error"],
+            "started_at": job["started_at"],
+            "finished_at": job["finished_at"],
+        }
 
     def _flag(value):
         return value is not None and value.lower() in ("1", "true", "yes", "on")
@@ -138,7 +165,7 @@ def create_app():
             # prune old finished jobs so the registry does not grow forever
             for cid in list(crawl_jobs):
                 job = crawl_jobs[cid]
-                if (job["status"] in ("completed", "failed")
+                if (job["status"] in ("completed", "failed", "stopped")
                         and job.get("finished_at")
                         and now - job["finished_at"] > _JOB_TTL_SECONDS):
                     del crawl_jobs[cid]
@@ -156,10 +183,13 @@ def create_app():
 
         try:
             final_stats = main.crawl_json(
-                **kwargs, progress_callback=_progress)
+                **kwargs,
+                progress_callback=_progress,
+                stop_event=job["stop_event"])
+            status = "stopped" if final_stats.get("interrupted") else "completed"
             with _jobs_lock:
                 job["stats"] = final_stats
-                job["status"] = "completed"
+                job["status"] = status
                 job["finished_at"] = time.time()
         except Exception as exc:
             message = str(exc) or exc.__class__.__name__
@@ -206,12 +236,22 @@ def create_app():
             return _error(str(exc), 400)
 
         crawl_id = _new_crawl_id()
+        # Before the crawl worker starts reporting real stats, show a
+        # stage so the frontend can display what the crawl is doing.
+        # Sitemap discovery runs before crawling; in "skip" mode there
+        # is no discovery, so we start in the crawling stage.
+        initial_stage = (
+            "crawling"
+            if normalized.get("sitemap") == "skip"
+            else "discovering_sitemaps"
+        )
         job = {
             "status": "running",
-            "stats": {},
+            "stats": {"stage": initial_stage},
             "error": None,
             "started_at": time.time(),
             "finished_at": None,
+            "stop_event": threading.Event(),
         }
         with _jobs_lock:
             crawl_jobs[crawl_id] = job
@@ -228,18 +268,32 @@ def create_app():
 
     @app.get("/api/crawl/status/<crawl_id>")
     def api_crawl_status(crawl_id):
+        # The worker thread updates job fields under the lock, so read
+        # everything into a snapshot while holding it: the response is
+        # a consistent view of the job at one instant.
         with _jobs_lock:
             job = crawl_jobs.get(crawl_id)
-        if job is None:
-            return _error("crawl not found", 404)
-        return jsonify(
-            crawl_id=crawl_id,
-            status=job["status"],
-            stats=job["stats"],
-            error=job["error"],
-            started_at=job["started_at"],
-            finished_at=job["finished_at"],
-        )
+            if job is None:
+                return _error("crawl not found", 404)
+            snapshot = _job_snapshot(job)
+        return jsonify(crawl_id=crawl_id, **snapshot)
+
+    @app.post("/api/crawl/stop/<crawl_id>")
+    def api_crawl_stop(crawl_id):
+        # Request a graceful stop of a running crawl. This sets the
+        # job's stop_event, which the crawl worker polls between units
+        # of work - the exact same shared stop path used by Ctrl+C
+        # (main._stop_crawl). The response is the current job snapshot;
+        # poll /api/crawl/status/<crawl_id> to watch the crawl reach
+        # the terminal "stopped" status.
+        with _jobs_lock:
+            job = crawl_jobs.get(crawl_id)
+            if job is None:
+                return _error("crawl not found", 404)
+            if job["status"] == "running":
+                job["stop_event"].set()
+            snapshot = _job_snapshot(job)
+        return jsonify(crawl_id=crawl_id, **snapshot)
 
     # ---------- misc ----------
 
