@@ -10,6 +10,13 @@ Start the server (pick one)::
 
     python -m flask --app app run
     .venv\\Scripts\\flask.exe --app app run
+    python app.py          # binds 0.0.0.0:5000 (all interfaces)
+
+`python app.py` binds to 0.0.0.0:5000 so the server is reachable on
+every interface — localhost, LAN addresses, and public addresses such
+as sslip.io wildcard DNS (e.g. http://<ip>.sslip.io:5000). `flask
+--app app run` defaults to 127.0.0.1:5000; pass `--host 0.0.0.0` to
+bind all interfaces too.
 
 Endpoints
 ---------
@@ -319,4 +326,7 @@ app = create_app()
 if __name__ == "__main__":
     # Convenience for `python app.py`; for real deployments prefer
     # `flask --app app run` (or a WSGI server such as waitress).
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    # Bind to 0.0.0.0 so the server is reachable on every interface:
+    # localhost (127.0.0.1), LAN addresses, and public addresses such
+    # as sslip.io wildcard DNS (e.g. http://<ip>.sslip.io:5000).
+    app.run(host="0.0.0.0", port=5000, debug=True)

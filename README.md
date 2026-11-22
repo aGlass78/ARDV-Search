@@ -114,7 +114,9 @@ Results for: life
 
 - Open cmd from the address bar again and activate the venv by running `.venv\scripts\activate`
 - Run the command `py app.py`
-- Open 127.0.0.1:5000 in any web browser.
+- Open 127.0.0.1:5000 in any web browser. (`py app.py` binds to
+  0.0.0.0:5000 — all interfaces — so it is reachable at your LAN/IP
+  address too, e.g. via sslip.io: `http://<ip>.sslip.io:5000`.)
 
 - The arguments in the cli are present as settings options in the web version, enable developer settings for the complete list.
 
@@ -247,6 +249,8 @@ Start it (from the repo root):
 
 ```bash
 .venv\Scripts\flask.exe --app app run   # dev server, 127.0.0.1:5000
+.venv\Scripts\python.exe app.py          # all interfaces, 0.0.0.0:5000
+# flask defaults to localhost only; add --host 0.0.0.0 to bind all interfaces
 # or: .venv\Scripts\python.exe app.py
 ```
 
