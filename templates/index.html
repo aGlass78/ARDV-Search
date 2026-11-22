@@ -378,6 +378,53 @@
       overflow-wrap: anywhere;
     }
 
+    .pagination {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      margin-top: 28px;
+    }
+
+    .page-btn {
+      min-width: 34px;
+      height: 34px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--text);
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background .15s ease, border-color .15s ease;
+    }
+
+    .page-btn:hover:not(:disabled):not(.active) {
+      background: var(--hover);
+    }
+
+    .page-btn.active {
+      background: var(--button-bg);
+      color: var(--button-text);
+      border-color: var(--button-bg);
+    }
+
+    .page-btn:disabled {
+      opacity: .45;
+      cursor: default;
+    }
+
+    .page-gap {
+      min-width: 22px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 34px;
+      user-select: none;
+    }
+
     /* Loading / empty / error states */
 
     .state-box {
@@ -1497,9 +1544,6 @@
       } catch {
         // Mode switching still works if storage is unavailable.
       }
-
-      const input = mode === "crawl" ? crawlInput : searchInput;
-      input.focus({ preventScroll: true });
     }
 
     const savedMode = (() => {
@@ -1571,8 +1615,100 @@
       target.appendChild(wrap);
     }
 
-    function renderResults(data) {
+    /* Pagination: a page always shows at most PAGE_SIZE results; when
+       more were fetched, numbered page buttons appear below the list. */
+    const PAGE_SIZE = 10;
+    let lastData = null;
+    let currentPage = 1;
+
+    function buildPagination(totalPages) {
+      const nav = document.createElement("nav");
+      nav.className = "pagination";
+      nav.setAttribute("aria-label", "Search results pages");
+
+      const go = (page) => {
+        const target = Math.min(Math.max(1, page), totalPages);
+        if (target !== currentPage) {
+          currentPage = target;
+          renderResultsPage();
+        }
+      };
+
+      const prev = document.createElement("button");
+      prev.type = "button";
+      prev.className = "page-btn";
+      prev.textContent = "‹ Prev";
+      prev.disabled = currentPage === 1;
+      prev.addEventListener("click", () => go(currentPage - 1));
+      nav.appendChild(prev);
+
+      const makeNum = (page) => {
+        const num = document.createElement("button");
+        num.type = "button";
+        num.className =
+          "page-btn" + (page === currentPage ? " active" : "");
+        num.textContent = String(page);
+
+        if (page === currentPage) {
+          num.setAttribute("aria-current", "page");
+        }
+
+        num.addEventListener("click", () => go(page));
+        return num;
+      };
+
+      const makeGap = () => {
+        const gap = document.createElement("span");
+        gap.className = "page-gap";
+        gap.textContent = "…";
+        return gap;
+      };
+
+      // Window of page numbers: the current page, 3 before, 3 after.
+      const windowStart = Math.max(1, currentPage - 3);
+      const windowEnd = Math.min(totalPages, currentPage + 3);
+
+      if (windowStart > 1) {
+        nav.appendChild(makeNum(1));
+        if (windowStart > 2) {
+          nav.appendChild(makeGap());
+        }
+      }
+
+      for (let i = windowStart; i <= windowEnd; i++) {
+        nav.appendChild(makeNum(i));
+      }
+
+      if (windowEnd < totalPages) {
+        if (windowEnd < totalPages - 1) {
+          nav.appendChild(makeGap());
+        }
+        nav.appendChild(makeNum(totalPages));
+      }
+
+      const next = document.createElement("button");
+      next.type = "button";
+      next.className = "page-btn";
+      next.textContent = "Next ›";
+      next.disabled = currentPage === totalPages;
+      next.addEventListener("click", () => go(currentPage + 1));
+      nav.appendChild(next);
+
+      const last = document.createElement("button");
+      last.type = "button";
+      last.className = "page-btn";
+      last.textContent = "Last";
+      last.disabled = currentPage === totalPages;
+      last.addEventListener("click", () => go(totalPages));
+      nav.appendChild(last);
+
+      return nav;
+    }
+
+    function renderResultsPage() {
       results.innerHTML = "";
+
+      const data = lastData || {};
 
       const hasMeta =
         typeof data.total_results === "number" &&
@@ -1590,9 +1726,11 @@
         results.appendChild(meta);
       }
 
-      const list = Array.isArray(data.results) ? data.results : [];
+      const totalPages = Math.max(1, Math.ceil(lastResults.length / PAGE_SIZE));
+      const start = (currentPage - 1) * PAGE_SIZE;
+      const pageItems = lastResults.slice(start, start + PAGE_SIZE);
 
-      if (list.length === 0) {
+      if (lastResults.length === 0) {
         const empty = document.createElement("div");
         empty.className = "state-box";
 
@@ -1609,7 +1747,7 @@
         return;
       }
 
-      for (const item of list) {
+      for (const item of pageItems) {
         const row = document.createElement("div");
         row.className = "result";
 
@@ -1639,6 +1777,17 @@
         row.appendChild(snippet);
         results.appendChild(row);
       }
+
+      if (totalPages > 1) {
+        results.appendChild(buildPagination(totalPages));
+      }
+    }
+
+    function renderResults(data) {
+      lastData = data;
+      lastResults = Array.isArray(data.results) ? data.results : [];
+      currentPage = 1;
+      renderResultsPage();
     }
 
     const ERROR_ICON =
@@ -1723,7 +1872,7 @@
       // --e and --es are mutually exclusive; Exact match wins.
       const exact = settings.search.exact;
       params.set("exact", exact ? "1" : "0");
-      params.set("stem", exact || settings.phrase ? "1" : "0");
+      params.set("stem", !exact && settings.phrase ? "1" : "0");
 
       if (settings.search.db) {
         params.set("db", settings.search.db);
@@ -1835,6 +1984,27 @@
       return String(key).replace(/_/g, " ");
     }
 
+    function formatElapsed(seconds) {
+      const s = Number.isFinite(seconds) && seconds >= 0 ? seconds : 0;
+      const pad = (n) => String(n).padStart(2, "0");
+      const hrs = Math.floor(s / 3600);
+      const mins = Math.floor((s % 3600) / 60);
+      const secs = Math.floor(s % 60);
+      return `${pad(hrs)}hr:${pad(mins)}min:${pad(secs)}sec`;
+    }
+
+    /* The backend only fills stats.elapsed_seconds when the crawl
+       finishes, so while running we compute it from the job's
+       started_at timestamp (Unix seconds). Returns null when the
+       timestamp isn't available. */
+    function liveElapsedSeconds(snapshot) {
+      const startedAt = snapshot && snapshot.started_at;
+      if (typeof startedAt !== "number" || !Number.isFinite(startedAt)) {
+        return null;
+      }
+      return Math.max(0, Date.now() / 1000 - startedAt);
+    }
+
     function renderCrawlStats(stats, metaText) {
       crawlResults.innerHTML = "";
 
@@ -1858,7 +2028,9 @@
       for (const [key, value] of Object.entries(stats)) {
         let display = null;
 
-        if (
+        if (key === "elapsed_seconds") {
+          display = formatElapsed(value);
+        } else if (
           typeof value === "string" ||
           typeof value === "number" ||
           typeof value === "boolean"
@@ -1906,23 +2078,31 @@
       crawlProgressTrack.setAttribute("aria-valuenow", "0");
     }
 
-    function updateCrawlProgress(stats) {
-      const s = stats || {};
+    function updateCrawlProgress(snapshot) {
+      const s = (snapshot && snapshot.stats) || {};
       const indexed = Number.isFinite(s.indexed) ? s.indexed : 0;
       const hasMax =
         Number.isFinite(s.max_pages) && s.max_pages > 0;
-      const max = hasMax
-        ? s.max_pages
-        : (Number.isFinite(s.queued) && s.queued > 0 ? s.queued : 0);
-      const pct = max > 0
-        ? Math.min(100, Math.round((indexed / max) * 100))
+      const discovered = Number.isFinite(s.links_discovered)
+        ? s.links_discovered
+        : 0;
+      const denominator = hasMax ? s.max_pages : discovered;
+      const pct = denominator > 0
+        ? Math.min(100, Math.round((indexed / denominator) * 100))
         : 0;
 
       crawlProgressFill.style.width = pct + "%";
       crawlProgressTrack.setAttribute("aria-valuenow", String(pct));
-      crawlProgressTrack.setAttribute("aria-valuemax", String(max));
+      crawlProgressTrack.setAttribute("aria-valuemax", String(denominator));
 
-      let label = `${indexed} / ${max} pages indexed`;
+      let label = hasMax
+        ? `${indexed} / ${denominator} pages indexed`
+        : `${indexed} indexed · ${denominator} links discovered`;
+
+      const elapsed = liveElapsedSeconds(snapshot);
+      if (elapsed !== null) {
+        label += ` · ${formatElapsed(elapsed)}`;
+      }
       if (typeof s.stage === "string" && s.stage) {
         label += ` · ${humanizeKey(s.stage)}`;
       }
@@ -1950,12 +2130,31 @@
         return;
       }
 
+      // The engine's stats.stage stays at "crawling" once the crawl
+      // ends, so surface the terminal status itself as the stage.
       const interrupted = !!(snapshot.stats && snapshot.stats.interrupted);
       const meta =
         snapshot.status === "stopped" || interrupted
           ? "Crawl stopped."
           : "Crawl finished.";
-      renderCrawlStats(snapshot.stats, meta);
+
+      const displayStats =
+        snapshot.stats && typeof snapshot.stats === "object"
+          ? { ...snapshot.stats }
+          : snapshot.stats;
+
+      if (displayStats && typeof displayStats === "object") {
+        displayStats.stage =
+          snapshot.status === "stopped"
+            ? "stopped"
+            : snapshot.status === "completed"
+              ? "completed"
+              : snapshot.status === "failed"
+                ? "failed"
+                : displayStats.stage;
+      }
+
+      renderCrawlStats(displayStats, meta);
       crawlStatus.textContent = meta;
       setCrawlLoading(false);
     }
@@ -1995,8 +2194,17 @@
           return;
         }
 
-        updateCrawlProgress(snapshot.stats);
-        renderCrawlStats(snapshot.stats, "Crawling…");
+        const runningStats =
+          snapshot.stats && typeof snapshot.stats === "object"
+            ? { ...snapshot.stats }
+            : {};
+        const elapsed = liveElapsedSeconds(snapshot);
+        if (elapsed !== null) {
+          runningStats.elapsed_seconds = elapsed;
+        }
+
+        updateCrawlProgress(snapshot);
+        renderCrawlStats(runningStats, "Crawling…");
 
         if (snapshot.status === "running") {
           stopCrawlButton.hidden = false;
