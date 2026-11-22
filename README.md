@@ -47,22 +47,13 @@ services, no API keys, no data leaving your machine.
 
 - Type "cmd" in the address bar.
 
-- Run the following commands in order.
+- Run the following commands.
 
 ```bash
-# Clones the repo
 git clone https://github.com/aGlass78/ARDV-Search
-# Changes working dir. into the created folder.
 cd ARDV-Search
-# Creates the virtual enviornment
 python -m venv .venv
-
-# On Linux / macOS
-source .venv/bin/activate
-# On Windows      
 .venv\Scripts\activate          
-
-# install dependencies
 python -m pip install -r requirements.txt
 ```
 
@@ -121,7 +112,8 @@ Results for: life
 
 ## Usage (WEB)
 
-- Open cmd from the address bar again and run the command `py app.py`
+- Open cmd from the address bar again and activate the venv by running `.venv\scripts\activate`
+- Run the command `py app.py`
 - Open 127.0.0.1:5000 in any web browser.
 
 - The arguments in the cli are present as settings options in the web version, enable developer settings for the complete list.
