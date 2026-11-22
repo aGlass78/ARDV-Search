@@ -6,7 +6,7 @@ a local SQLite database, and lets you search them from the command line — no e
 services, no API keys, no data leaving your machine.
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-283%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-284%20passing-brightgreen)
 
 ## Key Features
 
@@ -227,20 +227,21 @@ main.search_json("python", limit=5)  # {"query", "results", "total_results", "se
   message>", "started_at", "finished_at"}`. Unknown id → 404. While
   `running`, `stats` is a live snapshot (`indexed`, `requests`,
   `links_discovered`, `queued`, `errors`, …); when `completed` it is
-  final; when `stopped`, the crawl was stopped early via the stop
-  endpoint and `stats` carries `"interrupted": true`; when `failed`,
+  final; when `stopped`, the crawl was stopped early via the POST stop
+  action below and `stats` carries `"interrupted": true`; when `failed`,
   `error` holds a one-line message to display.
   Before the crawl worker starts reporting, `stats` is `{"stage":
   "discovering_sitemaps"}` (or `{"stage": "crawling"}` in skip mode);
   after that, every snapshot carries `"stage": "crawling"` too. The
   endpoint returns a consistent snapshot taken under the job lock.
-- `POST /api/crawl/stop/<crawl_id>` — requests a graceful stop of a
-  running crawl. It sets the job's stop event (the same shared stop path
-  as Ctrl+C in `main.py`): in-flight fetches finish, queued work is
-  cancelled, and the job ends with status `"stopped"` and stats
-  `"interrupted": true`. Responses with the current job snapshot (same
-  shape as the status endpoint); stopping a non-running job is a no-op
-  that returns its current state; unknown id → 404.
+- `POST /api/crawl/status/<crawl_id>` — the same URL; send body
+  `{"action": "stop"}` to request a graceful stop of a running crawl.
+  It sets the job's stop event (the same shared stop path as Ctrl+C in
+  `main.py`): in-flight fetches finish, queued work is cancelled, and
+  the job ends with status `"stopped"` and stats `"interrupted": true`.
+  Responds with the current job snapshot (same shape as GET); stopping a
+  non-running job is a no-op that returns its current state; missing/
+  other action → 400; unknown id → 404.
 - `GET /api/status` → `{"status": "ok", "engine": "ModelSearchEngine",
   "database": ..., "database_exists": ...}`.
 - `GET /` → the UI shell `templates/index.html`.
@@ -260,7 +261,7 @@ curl "http://127.0.0.1:5000/api/status"
 curl -X POST -H "Content-Type: application/json" -d '{"start_url":"https://quotes.toscrape.com","max_pages":100,"threads":8,"delay":0.5}' http://127.0.0.1:5000/api/crawl
 # -> {"crawl_id":"c83f91a2","status":"running"}
 curl "http://127.0.0.1:5000/api/crawl/status/c83f91a2"
-curl -X POST "http://127.0.0.1:5000/api/crawl/stop/c83f91a2"
+curl -X POST -H "Content-Type: application/json" -d '{"action":"stop"}' http://127.0.0.1:5000/api/crawl/status/c83f91a2
 # -> {"crawl_id":"c83f91a2","status":"running", ...}
 curl "http://127.0.0.1:5000/api/crawl/status/c83f91a2"
 # -> when stopped: {"crawl_id":"c83f91a2","status":"stopped","stats":{...,"interrupted":true}, ...}
@@ -271,8 +272,8 @@ while the crawler writes to the same database.
 
 ## Running the Tests (Running or not running tests doesnt effect app functionality; skip if not interested.)
 
-283 tests run on the standard library's `unittest` against a local HTTP server —
-the 44 newest are the Flask/JSON API tests (stages 18-19), which use Flask's test client, so no server process needs to be started for them.
+284 tests run on the standard library's `unittest` against a local HTTP server —
+the 45 newest are the Flask/JSON API tests (stages 18-19), which use Flask's test client, so no server process needs to be started for them.
 **no external network access is needed**:
 
 ```bash

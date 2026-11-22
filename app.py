@@ -64,20 +64,19 @@ GET /api/crawl/status/<crawl_id>
           "finished_at": null | <unix seconds>
         }
 
-    "stopped" means the crawl was stopped via POST
-    /api/crawl/stop/<crawl_id> (or Ctrl+C in the CLI); its stats carry
-    "interrupted": true.
-
+    "stopped" means the crawl was stopped via the POST action below
+    (or Ctrl+C in the CLI); its stats carry "interrupted": true.
     Unknown crawl_id -> 404 {"error": "crawl not found"}.
 
-POST /api/crawl/stop/<crawl_id>
-    Requests a graceful stop of a running crawl. Sets the job's stop
-    event (the same shared stop path as Ctrl+C in main.py); in-flight
-    fetches finish, queued work is cancelled, and the job ends with
-    status "stopped" and stats "interrupted": true. Response is the
-    current job snapshot (same shape as the status endpoint). Stopping
-    a non-running job is a no-op that returns its current state.
-    Unknown crawl_id -> 404 {"error": "crawl not found"}.
+POST /api/crawl/status/<crawl_id>
+    Same URL; the body is `{"action": "stop"}` to request a graceful
+    stop of a running crawl. Sets the job's stop event (the same
+    shared stop path as Ctrl+C in main.py); in-flight fetches finish,
+    queued work is cancelled, and the job ends with status "stopped"
+    and stats "interrupted": true. Response is the current job snapshot
+    (same shape as GET). Stopping a non-running job is a no-op that
+    returns its current state. Missing/other action -> 400; unknown
+    crawl_id -> 404 {"error": "crawl not found"}.
 
 GET /api/status
     Lightweight liveness: engine name, default database path, and
@@ -273,8 +272,17 @@ def create_app():
 
         return jsonify(crawl_id=crawl_id, status="running"), 202
 
-    @app.get("/api/crawl/status/<crawl_id>")
+    @app.route("/api/crawl/status/<crawl_id>", methods=["GET", "POST"])
     def api_crawl_status(crawl_id):
+        # One endpoint, two verbs:
+        #   GET  -> the job snapshot (status polling).
+        #   POST -> body {"action": "stop"} requests a graceful stop of
+        #           a running crawl. It sets the job's stop_event,
+        #           which the crawl worker polls between units of work -
+        #           the exact same shared stop path used by Ctrl+C
+        #           (main._stop_crawl). The response is the current job
+        #           snapshot; keep polling GET to watch the crawl reach
+        #           the terminal "stopped" status.
         # The worker thread updates job fields under the lock, so read
         # everything into a snapshot while holding it: the response is
         # a consistent view of the job at one instant.
@@ -282,23 +290,13 @@ def create_app():
             job = crawl_jobs.get(crawl_id)
             if job is None:
                 return _error("crawl not found", 404)
-            snapshot = _job_snapshot(job)
-        return jsonify(crawl_id=crawl_id, **snapshot)
-
-    @app.post("/api/crawl/stop/<crawl_id>")
-    def api_crawl_stop(crawl_id):
-        # Request a graceful stop of a running crawl. This sets the
-        # job's stop_event, which the crawl worker polls between units
-        # of work - the exact same shared stop path used by Ctrl+C
-        # (main._stop_crawl). The response is the current job snapshot;
-        # poll /api/crawl/status/<crawl_id> to watch the crawl reach
-        # the terminal "stopped" status.
-        with _jobs_lock:
-            job = crawl_jobs.get(crawl_id)
-            if job is None:
-                return _error("crawl not found", 404)
-            if job["status"] == "running":
-                job["stop_event"].set()
+            if request.method == "POST":
+                data = request.get_json(silent=True)
+                if not isinstance(data, dict) or data.get("action") != "stop":
+                    return _error(
+                        'POST requires a JSON body {"action": "stop"}', 400)
+                if job["status"] == "running":
+                    job["stop_event"].set()
             snapshot = _job_snapshot(job)
         return jsonify(crawl_id=crawl_id, **snapshot)
 

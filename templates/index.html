@@ -1194,9 +1194,11 @@
            "finished_at": number | null }
          Unknown crawl_id -> 404 { "error": "crawl not found" }.
 
-       POST /api/crawl/stop/<crawl_id>
-         Requests a graceful stop (same shared stop path as Ctrl+C);
-         returns the current job snapshot (same shape as status).
+       POST /api/crawl/status/<crawl_id>  body: {"action": "stop"}
+         A POST with {"action": "stop"} requests a graceful stop
+         (same shared stop path as Ctrl+C); returns the current job
+         snapshot (same shape as GET). This is the only stop
+         endpoint — there is no /api/crawl/stop/.
          Unknown crawl_id -> 404 { "error": "crawl not found" }.
 
        The search endpoint mirrors main.search_json(); the crawl
@@ -1207,7 +1209,6 @@
     const API_SEARCH = "/api/search";
     const API_CRAWL = "/api/crawl";
     const API_CRAWL_STATUS = "/api/crawl/status/";
-    const API_CRAWL_STOP = "/api/crawl/stop/";
 
     const body = document.body;
     const themeToggle = document.getElementById("themeToggle");
@@ -2244,11 +2245,16 @@
       stopCrawlButton.textContent = "Stopping…";
 
       try {
+        // Stop is a POST to the status endpoint with {"action":"stop"}.
         await fetch(
-          API_CRAWL_STOP + encodeURIComponent(id),
+          API_CRAWL_STATUS + encodeURIComponent(id),
           {
             method: "POST",
-            headers: { Accept: "application/json" }
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ action: "stop" })
           }
         );
         // Keep polling; the crawl reaches "stopped" on its own.

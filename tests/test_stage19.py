@@ -5,8 +5,8 @@ Covers:
 - crawl_json() passing the callback through,
 - the Flask POST /api/crawl -> crawl_id -> GET /api/crawl/status/<id>
   flow, including concurrent crawls and failure reporting,
-- POST /api/crawl/stop/<crawl_id> and the shared stop path with
-  Ctrl+C (crawl()'s stop_event, stats["interrupted"]).
+- POST /api/crawl/status/<id> with {"action": "stop"} and the shared
+  stop path with Ctrl+C (crawl()'s stop_event, stats["interrupted"]).
 """
 import threading
 import time
@@ -271,11 +271,12 @@ class CrawlJobApiTests(CrawlJobWaitMixin, ServerTestCase):
 
 
 class CrawlStopApiTests(CrawlJobWaitMixin, ServerTestCase):
-    """POST /api/crawl/stop/<crawl_id> requests a graceful stop.
+    """POST /api/crawl/status/<crawl_id> with {"action": "stop"}.
 
     The stop goes through the same shared stop path as Ctrl+C
     (main._stop_crawl): the crawl finishes in-flight fetches, cancels
-    queued work, and ends with stats["interrupted"] == True.
+    queued work, and ends with stats["interrupted"] == True. The stop
+    lives on the status endpoint (one URL, GET polls / POST stops).
     """
 
     def setUp(self):
@@ -300,10 +301,15 @@ class CrawlStopApiTests(CrawlJobWaitMixin, ServerTestCase):
         self.assertEqual(resp.status_code, 202)
         return resp.get_json()["crawl_id"]
 
+    def _stop(self, crawl_id, **overrides):
+        payload = {"action": "stop"}
+        payload.update(overrides)
+        return self.client.post(f"/api/crawl/status/{crawl_id}", json=payload)
+
     def test_crawl_stop_endpoint_stops_running_crawl(self):
         crawl_id = self._start()
         # request the stop while the crawl is still running
-        resp = self.client.post(f"/api/crawl/stop/{crawl_id}")
+        resp = self._stop(crawl_id)
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
         self.assertEqual(data["crawl_id"], crawl_id)
@@ -318,7 +324,7 @@ class CrawlStopApiTests(CrawlJobWaitMixin, ServerTestCase):
         self.assertLess(final["stats"]["indexed"], 10)
 
     def test_crawl_stop_unknown_id_returns_404(self):
-        resp = self.client.post("/api/crawl/stop/nope")
+        resp = self._stop("nope")
         self.assertEqual(resp.status_code, 404)
         self.assertEqual(resp.get_json()["error"], "crawl not found")
 
@@ -327,9 +333,21 @@ class CrawlStopApiTests(CrawlJobWaitMixin, ServerTestCase):
         final = self._wait_for_finish(crawl_id)
         self.assertEqual(final["status"], "completed")
         # stopping a finished job is a no-op that returns its state
-        resp = self.client.post(f"/api/crawl/stop/{crawl_id}")
+        resp = self._stop(crawl_id)
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json()["status"], "completed")
+
+    def test_crawl_stop_requires_action_stop(self):
+        crawl_id = self._start()
+        # missing/other action -> 400, with no side effect
+        for payload in (None, {}, {"action": "pause"}, {"action": 3}):
+            resp = self.client.post(
+                f"/api/crawl/status/{crawl_id}", json=payload)
+            self.assertEqual(resp.status_code, 400)
+            self.assertIn("action", resp.get_json()["error"])
+        # the crawl was never stopped: it completes normally
+        final = self._wait_for_finish(crawl_id)
+        self.assertEqual(final["status"], "completed")
 
 
 class CrawlStopEventTests(ServerTestCase):
