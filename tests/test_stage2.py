@@ -393,6 +393,32 @@ class SqliteTests(unittest.TestCase):
             conn.close()
         self.assertEqual(count, 5)
 
+    def test_legacy_init_still_creates_v1_fts5(self):
+        # Transitional invariant (pre-Phase-4): production get_database()
+        # must STILL create the legacy v1 standalone FTS5 table, not the
+        # v2 ordinary-page + external-content pair. The Phase-2 harness
+        # provisions v2 around crawl tests only; this pin keeps the real
+        # legacy init path honest until the Phase-4 migration flips it.
+        with mock.patch.object(main, "DB_PATH", self._tmp_db()):
+            conn = main.get_database()
+            try:
+                version = conn.execute(
+                    "PRAGMA user_version").fetchone()[0]
+                row = conn.execute(
+                    "SELECT type, sql FROM sqlite_master"
+                    " WHERE name='pages'"
+                ).fetchone()
+                virtual = conn.execute(
+                    "SELECT type FROM pragma_table_list WHERE name='pages'"
+                ).fetchone()[0]
+            finally:
+                conn.close()
+        self.assertEqual(version, 0)  # v2 would set user_version=2
+        self.assertIsNotNone(row)
+        self.assertTrue(row[1].startswith("CREATE VIRTUAL TABLE"))
+        self.assertIn("fts5", row[1])
+        self.assertEqual(virtual, "virtual")
+
 
 if __name__ == "__main__":
     unittest.main()

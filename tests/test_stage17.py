@@ -93,7 +93,7 @@ class DbFailureStatsTests(ServerTestCase):
         # Seed + p1..p4 insert fine (5 pending); p5's INSERT fails.
         proxy = FailingAfterNInsertConn(real, fail_at=6)
 
-        with mock.patch.object(main, "get_database", return_value=proxy), \
+        with mock.patch.object(main, "open_database", return_value=proxy), \
              mock.patch.object(main, "DB_COMMIT_BATCH", 100):
             stats = self.crawl(s.url("/seed"), max_pages=20,
                                delay=0.02, threads=1)
@@ -111,7 +111,7 @@ class DbFailureStatsTests(ServerTestCase):
         real = main.get_database(db_path)
         proxy = FailingCommitConn(real)
 
-        with mock.patch.object(main, "get_database", return_value=proxy), \
+        with mock.patch.object(main, "open_database", return_value=proxy), \
              mock.patch.object(main, "DB_COMMIT_BATCH", 100):
             stats = self.crawl(s.url("/seed"), max_pages=20,
                                delay=0.02, threads=1)
@@ -133,7 +133,7 @@ class DbFailureStatsTests(ServerTestCase):
         # only p2.
         proxy = FailingAfterNInsertConn(real, fail_at=3)
 
-        with mock.patch.object(main, "get_database", return_value=proxy), \
+        with mock.patch.object(main, "open_database", return_value=proxy), \
              mock.patch.object(main, "DB_COMMIT_BATCH", 2):
             stats = self.crawl(s.url("/seed"), max_pages=20,
                                delay=0.02, threads=1)

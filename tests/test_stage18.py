@@ -10,7 +10,7 @@ import unittest
 
 import main
 from app import create_app
-from helpers import IsolatedDbTestCase, ServerTestCase, page
+from helpers import IsolatedDbTestCase, ServerTestCase, page, provision_v2
 
 
 def _seed_pages(testcase):
@@ -83,6 +83,7 @@ class SearchJsonTests(IsolatedDbTestCase):
 
     def test_db_path_parameter_selects_database(self):
         other = self.tmp_path / "other.db"
+        provision_v2(other)
         conn = main.get_database(other)
         try:
             conn.execute(
@@ -171,6 +172,7 @@ class ApiTests(IsolatedDbTestCase):
 
     def test_db_flag_selects_database(self):
         other = self.tmp_path / "other.db"
+        provision_v2(other)
         conn = main.get_database(other)
         try:
             conn.execute(

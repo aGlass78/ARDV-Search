@@ -304,7 +304,7 @@ class BatchCommitTests(ServerTestCase):
         proxy = CommitCountingConn(real)
 
         with mock.patch.object(main, "DB_COMMIT_BATCH", 3), \
-             mock.patch.object(main, "get_database", return_value=proxy):
+             mock.patch.object(main, "open_database", return_value=proxy):
             stats = self.crawl(s.url("/seed"), max_pages=20, delay=0.02,
                                threads=1)
 

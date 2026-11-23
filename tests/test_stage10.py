@@ -305,7 +305,7 @@ class SplitErrorCounterTests(ServerTestCase):
             def close(self):
                 pass
 
-        with mock.patch.object(main, "get_database",
+        with mock.patch.object(main, "open_database",
                                return_value=FailingConn()):
             stats = self._crawl_one()
 

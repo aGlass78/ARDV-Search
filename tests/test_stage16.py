@@ -12,7 +12,8 @@ import pathlib
 import unittest
 
 import main
-from helpers import IsolatedDbTestCase, ServerTestCase, page, run_cli
+from helpers import (IsolatedDbTestCase, ServerTestCase, page,
+                     provision_v2, run_cli)
 
 
 class ResolveDbPathTests(unittest.TestCase):
@@ -138,6 +139,7 @@ class CrawlDbTests(ServerTestCase):
 class SearchDbTests(IsolatedDbTestCase):
     def test_search_reads_chosen_db(self):
         custom = self.tmp_path / "custom.db"
+        provision_v2(custom)
         conn = main.get_database(custom)
         try:
             conn.execute(
@@ -179,6 +181,7 @@ class SearchDbTests(IsolatedDbTestCase):
     def test_search_works_with_missing_default_present_choice(self):
         # Default DB absent, chosen DB present and searchable.
         custom = self.tmp_path / "custom.db"
+        provision_v2(custom)
         conn = main.get_database(custom)
         try:
             conn.execute(
@@ -196,6 +199,7 @@ class SearchDbTests(IsolatedDbTestCase):
 
     def test_cli_search_db_flag(self):
         custom = self.tmp_path / "custom.db"
+        provision_v2(custom)
         conn = main.get_database(custom)
         try:
             conn.execute(

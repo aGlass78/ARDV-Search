@@ -52,6 +52,33 @@ def run_cli(argv):
     return code, out.getvalue(), err.getvalue()
 
 
+def provision_v2(db_path):
+    """Create the v2 schema at db_path (idempotent).
+
+    Phase 2+ crawl tests run against the v2 schema. The crawler's
+    get_database() still issues the legacy `CREATE VIRTUAL TABLE IF NOT
+    EXISTS pages USING fts5(...)`, which is a silent no-op once an
+    ordinary `pages` table exists here, so provisioning up front lets
+    the unchanged production code co-exist with a v2 database.
+
+    Safe under concurrency: the connection sets a busy timeout and the
+    DDL is a no-op when the v2 schema already exists (so parallel job
+    workers provisioning the same database do not race on DDL writes).
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("PRAGMA busy_timeout=5000")
+        present = conn.execute(
+            "SELECT count(*) FROM sqlite_master"
+            " WHERE name='pages_fts'"
+        ).fetchone()[0]
+        if not present:
+            main.create_schema_v2(conn)
+            conn.commit()  # caller-owned commit (transaction-ownership contract)
+    finally:
+        conn.close()
+
+
 class TestServer:
     """Minimal threaded HTTP server with a timestamped request log."""
 
@@ -197,7 +224,8 @@ class IsolatedDbTestCase(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def insert_page(self, url, title="", description="", body=""):
-        conn = main.get_database()  # creates the FTS5 schema
+        provision_v2(self.db_path)  # v2 schema (Phase 3+ search tests)
+        conn = main.get_database()  # legacy DDL no-ops over v2 pages
         try:
             conn.execute(
                 "INSERT INTO pages (url, title, description, body) VALUES (?, ?, ?, ?)",
@@ -220,6 +248,22 @@ class ServerTestCase(IsolatedDbTestCase):
         # Crawl scope comes from the seed (http://127.0.0.1:<port>/...)
         # and any port is crawlable by default, so nothing needs
         # patching for the local test server.
+
+        # Phase 2+: crawl tests run against the v2 schema. Patch
+        # get_database to provision v2 at the requested path lazily (so
+        # a custom --db target file is created on first use, exactly as
+        # in production), then delegate to the real implementation whose
+        # legacy FTS5 DDL no-ops once an ordinary `pages` table exists.
+        _real_get_database = main.get_database
+
+        def _v2_get_database(db_path=None):
+            provision_v2(main.resolve_db_path(db_path))
+            return _real_get_database(db_path)
+
+        self._patch_get_database = mock.patch.object(
+            main, "get_database", new=_v2_get_database)
+        self._patch_get_database.start()
+        self.addCleanup(self._patch_get_database.stop)
 
     def crawl(self, url, **kwargs):
         """Run main.crawl with output captured; returns its result."""

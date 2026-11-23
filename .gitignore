@@ -15,6 +15,7 @@ venv/
 result.db
 result.db-shm
 result.db-wal
+result.db.pre-migrate.bak
 *.db
 
 # Environment variables and secrets
