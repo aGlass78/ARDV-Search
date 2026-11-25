@@ -33,3 +33,6 @@ PROJECT.md
 HARNESS.md
 param.txt
 *.log
+# Benchmark outputs
+results/
+results_*/

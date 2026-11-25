@@ -2267,19 +2267,87 @@
 
     stopCrawlButton.addEventListener("click", requestCrawlStop);
 
+    /* Frontend URL guard for the crawl bar: empty/whitespace input is
+       rejected, a missing scheme gets https:// prepended, and the URL
+       must parse to a reachable host (a dot-containing domain, an IP
+       address, or localhost) — bare words like "youtube" never reach
+       the crawler. Returns { url } or { error }. */
+    function validateCrawlUrl(raw) {
+      const value = String(raw).trim();
+
+      if (!value) {
+        return { error: "Enter a URL to crawl." };
+      }
+
+      let url = value;
+      const schemeMatch = /^([a-z][a-z0-9+.-]*):\/\//i.exec(value);
+
+      if (schemeMatch && !/^https?$/i.test(schemeMatch[1])) {
+        return {
+          error:
+            `Only http:// and https:// URLs can be crawled ` +
+            `(got "${schemeMatch[1]}://").`
+        };
+      }
+
+      if (!schemeMatch) {
+        url = "https://" + url;
+      }
+
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch {
+        return { error: `"${value}" is not a valid URL.` };
+      }
+
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return {
+          error:
+            `Only http:// and https:// URLs can be crawled ` +
+            `(got "${parsed.protocol}//").`
+        };
+      }
+
+      const host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+      if (!host) {
+        return { error: "The URL is missing a hostname." };
+      }
+
+      const isLocalhost = host === "localhost";
+      const isIpv4 =
+        /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/
+          .test(host);
+      const isIpv6 = /^[0-9a-f:]+$/.test(host) && host.includes(":");
+      const hasDomainDot =
+        /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/
+          .test(host);
+
+      if (!isLocalhost && !isIpv4 && !isIpv6 && !hasDomainDot) {
+        return {
+          error:
+            `"${host}" is not a valid domain. Use a real domain ` +
+            `(e.g. example.com), an IP address, or localhost.`
+        };
+      }
+
+      return { url };
+    }
+
     crawlForm.addEventListener("submit", async (event) => {
       event.preventDefault();
 
-      let url = crawlInput.value.trim();
+      const checked = validateCrawlUrl(crawlInput.value);
 
-      if (!url) {
+      if (checked.error) {
+        resetCrawlPolling();
+        renderState(crawlResults, "Invalid crawl URL", checked.error);
+        crawlStatus.textContent = "";
         crawlInput.focus();
         return;
       }
 
-      if (!/^https?:\/\//i.test(url)) {
-        url = "https://" + url;
-      }
+      const url = checked.url;
 
       resetCrawlPolling();
       setCrawlLoading(true, url);
