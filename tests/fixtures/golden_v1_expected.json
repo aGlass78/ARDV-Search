@@ -1,0 +1,291 @@
+{
+  "meta": {
+    "corpus_pages": 10,
+    "db_sha256": "15de9b16136a595ec27d99c67ad934f3fd80c28fb165b532622486ef3324173c",
+    "python_version": "3.14.6",
+    "sqlite_version": "3.50.4"
+  },
+  "queries": {
+    "and_multiterm": {
+      "kwargs": {
+        "query": "google bomb"
+      },
+      "payload": {
+        "query": "google bomb",
+        "results": [
+          {
+            "snippet": "Inflected form",
+            "title": "Google Bombing",
+            "url": "http://example.com/google-bombing"
+          },
+          {
+            "snippet": "[Google] [bombing] is a search manipulation technique. [google] [bomb] [google] [bombs].",
+            "title": "",
+            "url": "http://example.com/google-bomb"
+          },
+          {
+            "snippet": "[google] controversial [bomb] is out of order.",
+            "title": "",
+            "url": "http://example.com/interrupted"
+          },
+          {
+            "snippet": "test",
+            "title": "Phrase Test",
+            "url": "http://example.com/phrase"
+          }
+        ],
+        "search_time": 0.002075,
+        "total_results": 4
+      }
+    },
+    "blank": {
+      "kwargs": {
+        "query": "   "
+      },
+      "payload": {
+        "query": "   ",
+        "results": [],
+        "search_time": 2e-06,
+        "total_results": 0
+      }
+    },
+    "count_limit": {
+      "kwargs": {
+        "limit": 2,
+        "query": "cats"
+      },
+      "payload": {
+        "query": "cats",
+        "results": [
+          {
+            "snippet": "[Cats] are small carnivorous mammals often kept as pets. [Cats] like to sleep and hunt. [cats] [cats].",
+            "title": "Cats",
+            "url": "http://example.com/cats"
+          }
+        ],
+        "search_time": 0.002104,
+        "total_results": 1
+      }
+    },
+    "empty": {
+      "kwargs": {
+        "query": ""
+      },
+      "payload": {
+        "query": "",
+        "results": [],
+        "search_time": 3e-06,
+        "total_results": 0
+      }
+    },
+    "exact_phrase": {
+      "kwargs": {
+        "exact": true,
+        "query": "google bomb"
+      },
+      "payload": {
+        "query": "google bomb",
+        "results": [
+          {
+            "snippet": "test",
+            "title": "Phrase Test",
+            "url": "http://example.com/phrase"
+          },
+          {
+            "snippet": "Google bombing is a search manipulation technique. [google bomb] google bombs.",
+            "title": "",
+            "url": "http://example.com/google-bomb"
+          }
+        ],
+        "search_time": 0.003867,
+        "total_results": 2
+      }
+    },
+    "multiword_and": {
+      "kwargs": {
+        "query": "hello world"
+      },
+      "payload": {
+        "query": "hello world",
+        "results": [
+          {
+            "snippet": "Has punctuation.",
+            "title": "Punctuation!",
+            "url": "http://example.com/punct"
+          }
+        ],
+        "search_time": 0.002402,
+        "total_results": 1
+      }
+    },
+    "or_fallback": {
+      "kwargs": {
+        "query": "zzznope python"
+      },
+      "payload": {
+        "query": "zzznope python",
+        "results": [
+          {
+            "snippet": "A programming language",
+            "title": "Python",
+            "url": "http://example.com/python"
+          }
+        ],
+        "search_time": 0.003136,
+        "total_results": 1
+      }
+    },
+    "prefix_fallback_snippet": {
+      "kwargs": {
+        "query": "cat"
+      },
+      "payload": {
+        "query": "cat",
+        "results": [
+          {
+            "snippet": "[Cats] are small carnivorous mammals often kept as pets. [Cats] like to sleep and hunt. [cats] [cats].",
+            "title": "Cats",
+            "url": "http://example.com/cats"
+          }
+        ],
+        "search_time": 0.002112,
+        "total_results": 1
+      }
+    },
+    "prefix_stem_off": {
+      "kwargs": {
+        "query": "runner"
+      },
+      "payload": {
+        "query": "runner",
+        "results": [
+          {
+            "snippet": "Porters",
+            "title": "Stemming",
+            "url": "http://example.com/stem"
+          }
+        ],
+        "search_time": 0.003127,
+        "total_results": 1
+      }
+    },
+    "prefix_stem_on": {
+      "kwargs": {
+        "query": "runner",
+        "stem": true
+      },
+      "payload": {
+        "query": "runner",
+        "results": [
+          {
+            "snippet": "Porters",
+            "title": "Stemming",
+            "url": "http://example.com/stem"
+          }
+        ],
+        "search_time": 0.00308,
+        "total_results": 1
+      }
+    },
+    "punct_only": {
+      "kwargs": {
+        "query": "!@#$"
+      },
+      "payload": {
+        "query": "!@#$",
+        "results": [],
+        "search_time": 2.7e-05,
+        "total_results": 0
+      }
+    },
+    "punct_word": {
+      "kwargs": {
+        "query": "punctuation"
+      },
+      "payload": {
+        "query": "punctuation",
+        "results": [
+          {
+            "snippet": "Has punctuation.",
+            "title": "Punctuation!",
+            "url": "http://example.com/punct"
+          }
+        ],
+        "search_time": 0.002951,
+        "total_results": 1
+      }
+    },
+    "single_default": {
+      "kwargs": {
+        "query": "python"
+      },
+      "payload": {
+        "query": "python",
+        "results": [
+          {
+            "snippet": "A programming language",
+            "title": "Python",
+            "url": "http://example.com/python"
+          }
+        ],
+        "search_time": 0.002289,
+        "total_results": 1
+      }
+    },
+    "stem": {
+      "kwargs": {
+        "query": "google bomb",
+        "stem": true
+      },
+      "payload": {
+        "query": "google bomb",
+        "results": [
+          {
+            "snippet": "Inflected form",
+            "title": "Google Bombing",
+            "url": "http://example.com/google-bombing"
+          },
+          {
+            "snippet": "[Google] [bombing] is a search manipulation technique. [google] [bomb] [google] [bombs].",
+            "title": "",
+            "url": "http://example.com/google-bomb"
+          },
+          {
+            "snippet": "[google] controversial [bomb] is out of order.",
+            "title": "",
+            "url": "http://example.com/interrupted"
+          },
+          {
+            "snippet": "test",
+            "title": "Phrase Test",
+            "url": "http://example.com/phrase"
+          }
+        ],
+        "search_time": 0.001993,
+        "total_results": 4
+      }
+    },
+    "tie_break": {
+      "kwargs": {
+        "query": "tie"
+      },
+      "payload": {
+        "query": "tie",
+        "results": [
+          {
+            "snippet": "identical duplicate content appears in two pages",
+            "title": "Tie",
+            "url": "http://example.com/tie-a"
+          },
+          {
+            "snippet": "identical duplicate content appears in two pages",
+            "title": "Tie",
+            "url": "http://example.com/tie-b"
+          }
+        ],
+        "search_time": 0.00308,
+        "total_results": 2
+      }
+    }
+  }
+}
