@@ -729,6 +729,126 @@
       margin-bottom: 0;
     }
 
+    /* Delete-database (developer) control */
+
+    .delete-db-button {
+      width: 100%;
+      margin-top: 8px;
+      padding: 9px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: border-color .2s, color .2s, background .2s;
+    }
+
+    .delete-db-button:hover {
+      border-color: #d33;
+      color: #d33;
+      background: rgb(221 51 51 / .08);
+    }
+
+    .delete-db-button:disabled {
+      opacity: .55;
+      cursor: default;
+    }
+
+    .db-delete-status {
+      margin-top: 8px;
+      font-size: 12px;
+      min-height: 1.2em;
+      color: var(--muted);
+    }
+
+    .db-delete-status.error {
+      color: #e5484d;
+    }
+
+    .db-delete-status.ok {
+      color: #4caf50;
+    }
+
+    /* Delete-database confirmation dialog */
+
+    .confirm-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgb(0 0 0 / .5);
+    }
+
+    .confirm-overlay[hidden] {
+      display: none;
+    }
+
+    .confirm-dialog {
+      width: min(370px, calc(100vw - 40px));
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 22px;
+      box-shadow: 0 18px 50px rgb(0 0 0 / .35);
+    }
+
+    .confirm-dialog h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+      color: var(--text);
+    }
+
+    .confirm-dialog p {
+      margin: 0 0 10px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .confirm-dialog .confirm-warning {
+      color: #e5484d;
+      font-weight: 600;
+    }
+
+    .confirm-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .confirm-actions button {
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      transition: background .2s, border-color .2s;
+    }
+
+    .confirm-actions .confirm-yes {
+      background: #d33;
+      border-color: #d33;
+      color: #fff;
+    }
+
+    .confirm-actions .confirm-yes:hover {
+      background: #b52b2f;
+      border-color: #b52b2f;
+    }
+
+    .confirm-actions .confirm-yes:disabled {
+      opacity: .55;
+      cursor: default;
+    }
+
     /* Developer-only settings are hidden unless the
        Developer toggle in the panel header is on. */
 
@@ -1065,6 +1185,24 @@
             <span class="switch-knob"></span>
           </button>
         </div>
+
+        <div class="setting"
+             title="Permanently delete a database file ('.db' is appended if missing). This action is not reversible.">
+          <label class="setting-label" for="searchDeleteDbInput">
+            Database to delete
+          </label>
+
+          <input class="setting-input" id="searchDeleteDbInput" type="text"
+                 autocomplete="off" spellcheck="false"
+                 placeholder="result.db">
+
+          <button class="delete-db-button" id="searchDeleteDbButton" type="button">
+            Delete Database
+          </button>
+
+          <p class="db-delete-status" id="searchDeleteDbStatus"
+             aria-live="polite"></p>
+        </div>
       </div>
     </div>
 
@@ -1143,9 +1281,53 @@
             <span class="switch-knob"></span>
           </button>
         </div>
+
+        <div class="setting"
+             title="Permanently delete a database file ('.db' is appended if missing). This action is not reversible.">
+          <label class="setting-label" for="crawlDeleteDbInput">
+            Database to delete
+          </label>
+
+          <input class="setting-input" id="crawlDeleteDbInput" type="text"
+                 autocomplete="off" spellcheck="false"
+                 placeholder="result.db">
+
+          <button class="delete-db-button" id="crawlDeleteDbButton" type="button">
+            Delete Database
+          </button>
+
+          <p class="db-delete-status" id="crawlDeleteDbStatus"
+             aria-live="polite"></p>
+        </div>
       </div>
     </div>
   </aside>
+
+  <div class="confirm-overlay" id="dbConfirmOverlay" hidden>
+    <div
+      class="confirm-dialog"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="dbConfirmTitle"
+      aria-describedby="dbConfirmText"
+    >
+      <h3 id="dbConfirmTitle">Delete database?</h3>
+      <p id="dbConfirmText"></p>
+      <p class="confirm-warning">
+        This action is not reversible.
+      </p>
+
+      <div class="confirm-actions">
+        <button class="confirm-cancel" id="dbConfirmCancel" type="button">
+          Cancel
+        </button>
+
+        <button class="confirm-yes" id="dbConfirmYes" type="button">
+          Yes, delete it
+        </button>
+      </div>
+    </div>
+  </div>
 
   <script>
     /* ============================================================
@@ -1201,6 +1383,15 @@
          endpoint — there is no /api/crawl/stop/.
          Unknown crawl_id -> 404 { "error": "crawl not found" }.
 
+       DELETE /api/database   (JSON body)
+         { "database": "result.db" }   // name; ".db" is appended
+                                       // by the frontend if missing
+         200 -> { "deleted": true, "database": "result.db" }
+         404 -> { "error": "database not found",
+                  "database": "result.db" }
+         other error -> non-200 with { "error": "message" }
+         (e.g. 409 if the database is currently in use)
+
        The search endpoint mirrors main.search_json(); the crawl
        endpoint mirrors main.crawl_json() (stats keys: indexed,
        queued, max_pages, requests, errors, stage, ...).
@@ -1209,6 +1400,7 @@
     const API_SEARCH = "/api/search";
     const API_CRAWL = "/api/crawl";
     const API_CRAWL_STATUS = "/api/crawl/status/";
+    const API_DATABASE = "/api/database";
 
     const body = document.body;
     const themeToggle = document.getElementById("themeToggle");
@@ -1404,10 +1596,14 @@
     overlay.addEventListener("click", hideSettings);
 
     document.addEventListener("keydown", (event) => {
-      if (
-        event.key === "Escape" &&
-        settingsPanel.classList.contains("open")
-      ) {
+      if (event.key !== "Escape") return;
+
+      if (!dbConfirmOverlay.hidden) {
+        closeDbConfirm();
+        return;
+      }
+
+      if (settingsPanel.classList.contains("open")) {
         hideSettings();
       }
     });
@@ -1507,6 +1703,129 @@
         settings.crawl.sitemap === "only" ? "auto" : "only";
       applySitemap();
       saveSettings();
+    });
+
+    /* ---------- delete database (developer) ---------- */
+
+    const deleteDbInputs = {
+      search: document.getElementById("searchDeleteDbInput"),
+      crawl: document.getElementById("crawlDeleteDbInput")
+    };
+
+    const deleteDbButtons = {
+      search: document.getElementById("searchDeleteDbButton"),
+      crawl: document.getElementById("crawlDeleteDbButton")
+    };
+
+    const deleteDbStatusEls = {
+      search: document.getElementById("searchDeleteDbStatus"),
+      crawl: document.getElementById("crawlDeleteDbStatus")
+    };
+
+    const dbConfirmOverlay = document.getElementById("dbConfirmOverlay");
+    const dbConfirmText = document.getElementById("dbConfirmText");
+    const dbConfirmCancel = document.getElementById("dbConfirmCancel");
+    const dbConfirmYes = document.getElementById("dbConfirmYes");
+
+    let pendingDeleteMode = null;
+
+    function normalizeDbName(raw) {
+      const name = String(raw || "").trim();
+      if (!name) return "";
+      return /\.db$/i.test(name) ? name : name + ".db";
+    }
+
+    function setDeleteDbStatus(mode, message, kind) {
+      const el = deleteDbStatusEls[mode];
+      if (!el) return;
+      el.textContent = message || "";
+      el.classList.toggle("error", kind === "error");
+      el.classList.toggle("ok", kind === "ok");
+    }
+
+    function openDbConfirm(mode) {
+      const name = normalizeDbName(deleteDbInputs[mode].value);
+
+      if (!name) {
+        deleteDbInputs[mode].focus();
+        setDeleteDbStatus(mode, "Enter a database name to delete.", "error");
+        return;
+      }
+
+      pendingDeleteMode = mode;
+      dbConfirmText.textContent =
+        `Delete "${name}"? The database file will be permanently removed.`;
+      dbConfirmOverlay.hidden = false;
+      dbConfirmYes.disabled = false;
+      dbConfirmYes.textContent = "Yes, delete it";
+      dbConfirmCancel.focus();
+    }
+
+    function closeDbConfirm() {
+      dbConfirmOverlay.hidden = true;
+      pendingDeleteMode = null;
+    }
+
+    async function confirmDeleteDb() {
+      const mode = pendingDeleteMode;
+      if (!mode) return;
+
+      const name = normalizeDbName(deleteDbInputs[mode].value);
+      dbConfirmYes.disabled = true;
+      dbConfirmYes.textContent = "Deleting…";
+      setDeleteDbStatus(mode, "", "");
+
+      try {
+        const response = await fetch(API_DATABASE, {
+          method: "DELETE",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ database: name })
+        });
+
+        let data = null;
+
+        try {
+          data = await response.json();
+        } catch {
+          // Non-JSON responses are reported generically below.
+        }
+
+        if (response.ok) {
+          setDeleteDbStatus(mode, `Deleted "${name}".`, "ok");
+        } else {
+          const msg = data && data.error
+            ? data.error
+            : `Delete failed (HTTP ${response.status}).`;
+          setDeleteDbStatus(mode, msg, "error");
+        }
+      } catch (err) {
+        const msg = err instanceof TypeError
+          ? "Could not reach the API. Start the backend with: python -m flask --app app run"
+          : (err.message || "Delete failed.");
+        setDeleteDbStatus(mode, msg, "error");
+      } finally {
+        closeDbConfirm();
+      }
+    }
+
+    Object.entries(deleteDbButtons).forEach(([mode, btn]) => {
+      btn.addEventListener("click", () => openDbConfirm(mode));
+    });
+
+    for (const mode of ["search", "crawl"]) {
+      deleteDbInputs[mode].addEventListener("keydown", (event) => {
+        if (event.key === "Enter") openDbConfirm(mode);
+      });
+    }
+
+    dbConfirmCancel.addEventListener("click", closeDbConfirm);
+    dbConfirmYes.addEventListener("click", confirmDeleteDb);
+
+    dbConfirmOverlay.addEventListener("click", (event) => {
+      if (event.target === dbConfirmOverlay) closeDbConfirm();
     });
 
     function applySettingsUI() {

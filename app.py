@@ -78,6 +78,28 @@ POST /api/crawl/status/<crawl_id>
     returns its current state. Missing/other action -> 400; unknown
     crawl_id -> 404 {"error": "crawl not found"}.
 
+DELETE /api/database
+    Deletes a database file (the frontend "Delete Database" control in
+    both Search and Crawl settings). Body is JSON:
+
+        {"database": "<db name>"}
+
+    The name is resolved exactly like --db: relative names anchor next
+    to main.py, and ".db" is appended when the name does not already
+    end with ".db" (the frontend already normalizes this before
+    sending). Responses:
+
+      - 200 {"deleted": true, "database": "<resolved name>"} — on
+        success; any residual -wal/-shm sidecars are best-effort
+        removed too.
+      - 404 {"error": "database not found", "database": "<name>"} —
+        the resolved file does not exist.
+      - 400 {"error": "<message>"} — body is not a JSON object, or
+        "database" is missing/not a non-empty string.
+      - 409 {"error": "<message>"} — the database is currently in use
+        and cannot be safely removed (e.g. a running crawl job is
+        writing to it, or the file is locked by another process).
+
 GET /api/status
     Lightweight liveness: engine name, default database path, and
     whether that database exists.
@@ -86,6 +108,8 @@ GET /
     Serves templates/index.html (the UI shell).
 """
 
+import os
+import pathlib
 import secrets
 import threading
 import time
@@ -258,6 +282,7 @@ def create_app():
             "started_at": time.time(),
             "finished_at": None,
             "stop_event": threading.Event(),
+            "db_path": str(main.resolve_db_path(normalized.get("db"))),
         }
         with _jobs_lock:
             crawl_jobs[crawl_id] = job
@@ -299,6 +324,58 @@ def create_app():
                     job["stop_event"].set()
             snapshot = _job_snapshot(job)
         return jsonify(crawl_id=crawl_id, **snapshot)
+
+    # ---------- database management ----------
+
+    @app.delete("/api/database")
+    def api_delete_database():
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or "database" not in data:
+            return _error(
+                'request body must be a JSON object with a "database" field',
+                400,
+            )
+        name = data["database"]
+        if not isinstance(name, str) or not name.strip():
+            return _error("database must be a non-empty string", 400)
+
+        path = main.resolve_db_path(name)
+
+        if not path.exists():
+            return jsonify(error="database not found", database=name), 404
+
+        # A running crawl holds its database connection open for the
+        # whole crawl; deleting such a file would fail on Windows (and
+        # silently produce a half-deleted state elsewhere). Refuse
+        # deterministically instead of relying on the OS lock error.
+        with _jobs_lock:
+            for job in crawl_jobs.values():
+                if (job["status"] == "running"
+                        and os.path.normcase(job["db_path"])
+                        == os.path.normcase(str(path))):
+                    return _error(
+                        "database is currently in use by a running crawl",
+                        409,
+                    )
+
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return jsonify(error="database not found", database=name), 404
+        except OSError as exc:
+            return _error(
+                f"database is in use and cannot be removed: {exc}", 409)
+
+        # Best-effort cleanup of WAL sidecars left behind by a live
+        # connection (e.g. a finished crawl that created them).
+        for suffix in ("-wal", "-shm"):
+            sidecar = pathlib.Path(str(path) + suffix)
+            try:
+                sidecar.unlink()
+            except OSError:
+                pass
+
+        return jsonify(deleted=True, database=str(path))
 
     # ---------- misc ----------
 
