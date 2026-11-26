@@ -6,7 +6,7 @@ a local SQLite database, and lets you search them from the command line — no e
 services, no API keys, no data leaving your machine.
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-284%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-403%20passing-brightgreen)
 
 ## Key Features
 
@@ -158,7 +158,7 @@ python main.py search "interesting topic" --limit 25
 | `--allow HOST[/PATH]` | none | Extra site to allow (repeatable to allow more sites) |
 | `--no-sitemap` | off / html + sitemap based discovery | Skip sitemap discovery entirely (robots.txt `Sitemap:` declaration + common-location probes); just crawl HTML links |
 | `--only-sitemap` | off / html + sitemap based discovery | Crawl only from sitemap URLs (no HTML link discovery); aborts with a message if no sitemap is found |
-| `--db FILE` | `result.db` | Database file for this crawl; relative paths are anchored next to main.py |
+| `--db FILE` | `result.db` | Database file for this crawl; relative paths are anchored next to main.py; missing parent directories are auto-created |
 
 **Search:**
 **`python main.py search <query> [options]`**
@@ -244,6 +244,14 @@ main.search_json("python", limit=5)  # {"query", "results", "total_results", "se
   other action → 400; unknown id → 404.
 - `GET /api/status` → `{"status": "ok", "engine": "ModelSearchEngine",
   "database": ..., "database_exists": ...}`.
+- `DELETE /api/database` — deletes a database file (the frontend
+  "Delete Database" control). Body is `{"database": "<name>"}`; names
+  resolve exactly like `--db` (relative anchored next to main.py, `.db`
+  appended when missing). Success →
+  `200 {"deleted": true, "database": "<resolved name>"}`; missing file →
+  `404 {"error": "database not found", "database": "<name>"}`;
+  empty/invalid name → 400; in use (running crawl job or OS lock) →
+  409. Any leftover `-wal/-shm` sidecars are removed best-effort.
 - `GET /` → the UI shell `templates/index.html`.
 
 Start it (from the repo root):
@@ -265,6 +273,8 @@ curl -X POST -H "Content-Type: application/json" -d '{"action":"stop"}' http://1
 # -> {"crawl_id":"c83f91a2","status":"running", ...}
 curl "http://127.0.0.1:5000/api/crawl/status/c83f91a2"
 # -> when stopped: {"crawl_id":"c83f91a2","status":"stopped","stats":{...,"interrupted":true}, ...}
+curl -X DELETE -H "Content-Type: application/json" -d '{"database":"myindex.db"}' http://127.0.0.1:5000/api/database
+# -> {"deleted":true,"database":"C:\\Users\\Admin\\ARDV-Search\\myindex.db"}
 ```
 
 Each request opens its own SQLite connection (WAL mode) — searches can run
@@ -272,8 +282,9 @@ while the crawler writes to the same database.
 
 ## Running the Tests (Running or not running tests doesnt effect app functionality; skip if not interested.)
 
-284 tests run on the standard library's `unittest` against a local HTTP server —
-the 45 newest are the Flask/JSON API tests (stages 18-19), which use Flask's test client, so no server process needs to be started for them.
+403 tests run on the standard library's `unittest` against a local HTTP server —
+the Flask/JSON API tests (stages 18-19, 26-27) use Flask's test client, so no
+server process needs to be started for them.
 **no external network access is needed**:
 
 ```bash

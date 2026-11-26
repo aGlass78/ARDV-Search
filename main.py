@@ -1289,6 +1289,11 @@ def open_database(db_path=None, progress_callback=None):
             # COMMIT), so a crash leaves an empty file rather than a
             # partially-initialized schema, and idempotent under
             # concurrent creation by another process.
+            # The parent directory may not exist yet (e.g. a relative
+            # db name like "data/foo.db" anchored next to main.py) —
+            # create it so the crawl can populate the database instead
+            # of failing on a missing directory.
+            db_file.parent.mkdir(parents=True, exist_ok=True)
             conn = sqlite3.connect(str(db_file))
             try:
                 conn.execute("PRAGMA journal_mode=WAL")
@@ -2444,7 +2449,7 @@ def crawl(
 
     try:
         conn = open_database(db_path)
-    except (MigrationError, DatabaseInspectionError) as error:
+    except (MigrationError, DatabaseInspectionError, OSError) as error:
         print(f"Database open failed: {error}")
         return None
 

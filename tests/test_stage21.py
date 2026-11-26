@@ -275,5 +275,59 @@ class CrawlUpsertTests(ServerTestCase):
         self.assertEqual(len(self.indexed_paths()), 10)
 
 
+class CrawlDirAutoCreateTests(ServerTestCase):
+    """Crawl must auto-create missing parent directories for the db path.
+
+    A relative db name like "data/foo.db" resolves (anchored next to
+    main.py) into a directory that may not exist yet; the crawler must
+    create it and populate the database instead of failing on a missing
+    directory. (Relative-in-repo names are not exercised here to keep
+    the test isolated; an absolute path with a missing parent exercises
+    the same code path.)
+    """
+
+    def test_crawl_creates_missing_db_directory(self):
+        self.server.add_robots("User-agent: *\nDisallow:\n")
+        s = self.server
+        s.add("/seed", page("Seed", "seed body"))
+
+        target = self.tmp_path / "new" / "nested" / "deep.db"
+        self.assertFalse(target.parent.exists())
+
+        stats = self.crawl(s.url("/seed"), db_path=str(target),
+                           max_pages=1, sitemap="skip", threads=1)
+
+        self.assertEqual(stats["indexed"], 1)
+        self.assertTrue(target.exists())
+        self.assertTrue(target.parent.is_dir())
+
+        # The created database is a normal v2 database.
+        probe = main._connect_readonly(target)
+        try:
+            self.assertEqual(main.detect_schema(probe)["kind"], "v2")
+        finally:
+            probe.close()
+
+    def test_crawl_returns_none_when_db_dir_creation_fails(self):
+        # Simulate an uncreatable parent: place a file where the
+        # directory should go, so mkdir fails; the crawler must
+        # degrade to the normal "Database open failed" path (returns
+        # None, prints, indexes nothing) instead of crashing.
+        self.server.add_robots("User-agent: *\nDisallow:\n")
+        s = self.server
+        s.add("/seed", page("Seed", "seed body"))
+
+        blocker = self.tmp_path / "blocker"
+        blocker.write_bytes(b"not a directory")
+        target = blocker / "sub" / "deep.db"
+
+        stats = self.crawl(s.url("/seed"), db_path=str(target),
+                           max_pages=1, sitemap="skip", threads=1)
+
+        self.assertIsNone(stats)
+        self.assertFalse(target.parent.exists())
+        self.assertIn("Database open failed:", self.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
