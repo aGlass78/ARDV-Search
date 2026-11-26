@@ -1282,6 +1282,18 @@
           </button>
         </div>
 
+        <div class="setting-row"
+             title="When on, pages whose robots.txt cannot be verified (fetch failure / timeout / non-200 response) are treated as allow-all and ARE crawled — they would otherwise be skipped and counted in stats.robots_unavailable. Explicit robots.txt Disallow rules are still honored either way.">
+          <span class="setting-label">
+            Crawl pages when robots.txt is unavailable
+          </span>
+
+          <button class="switch" id="crawlUnavailableRobotsSwitch" type="button"
+                  role="switch" aria-checked="false">
+            <span class="switch-knob"></span>
+          </button>
+        </div>
+
         <div class="setting"
              title="Permanently delete a database file ('.db' is appended if missing). This action is not reversible.">
           <label class="setting-label" for="crawlDeleteDbInput">
@@ -1363,6 +1375,13 @@
            "allow": [ "host" | "host/path", ... ],   // --allow
            "sitemap": "auto" | "skip" | "only",      // --no-sitemap /
                                                      // --only-sitemap
+           "crawl_unavailable_robots": bool,          // default false; true
+                                                     // = crawl pages whose
+                                                     // robots.txt cannot be
+                                                     // verified (fetch
+                                                     // failure / timeout /
+                                                     // non-200) — explicit
+                                                     // Disallow still honored
            "db": str }                 // --db
          202 -> { "crawl_id": str, "status": "running" }
          error -> non-200 with { "error": "message" }
@@ -1441,6 +1460,8 @@
       document.getElementById("noSitemapSwitch");
     const onlySitemapSwitch =
       document.getElementById("onlySitemapSwitch");
+    const crawlUnavailableRobotsSwitch =
+      document.getElementById("crawlUnavailableRobotsSwitch");
 
     const searchSettings =
       document.getElementById("searchSettings");
@@ -1460,7 +1481,8 @@
         delay: "",
         max_bytes: "",
         threads: "",
-        sitemap: "auto"
+        sitemap: "auto",
+        crawl_unavailable_robots: false
       }
     };
 
@@ -1705,6 +1727,24 @@
       saveSettings();
     });
 
+    /* Crawl-unavailable-robots toggle: when on, pages whose robots.txt
+       cannot be verified are treated as allow-all and crawled (the
+       engine still honors explicit Disallow rules). */
+
+    function applyRobotsUnavailable() {
+      applySwitch(
+        crawlUnavailableRobotsSwitch,
+        settings.crawl.crawl_unavailable_robots
+      );
+    }
+
+    crawlUnavailableRobotsSwitch.addEventListener("click", () => {
+      settings.crawl.crawl_unavailable_robots =
+        !settings.crawl.crawl_unavailable_robots;
+      applyRobotsUnavailable();
+      saveSettings();
+    });
+
     /* ---------- delete database (developer) ---------- */
 
     const deleteDbInputs = {
@@ -1832,6 +1872,7 @@
       applyDeveloper();
       applyPhraseAvailability();
       applySitemap();
+      applyRobotsUnavailable();
     }
 
     /* ---------- mode switcher ---------- */
@@ -2686,6 +2727,7 @@
         threads: parsePositiveInt(c.threads),
         allow,
         sitemap: c.sitemap,
+        crawl_unavailable_robots: c.crawl_unavailable_robots,
         db: c.db
       };
 

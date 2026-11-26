@@ -6,7 +6,7 @@ a local SQLite database, and lets you search them from the command line — no e
 services, no API keys, no data leaving your machine.
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-403%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-410%20passing-brightgreen)
 
 ## Key Features
 
@@ -159,6 +159,7 @@ python main.py search "interesting topic" --limit 25
 | `--no-sitemap` | off / html + sitemap based discovery | Skip sitemap discovery entirely (robots.txt `Sitemap:` declaration + common-location probes); just crawl HTML links |
 | `--only-sitemap` | off / html + sitemap based discovery | Crawl only from sitemap URLs (no HTML link discovery); aborts with a message if no sitemap is found |
 | `--db FILE` | `result.db` | Database file for this crawl; relative paths are anchored next to main.py; missing parent directories are auto-created |
+| `--crawl-unavailable-robots` | off | Crawl pages whose robots.txt cannot be verified (fetch failure / timeout / non-200) instead of skipping them; explicit `Disallow` rules are still honored |
 
 **Search:**
 **`python main.py search <query> [options]`**
@@ -213,8 +214,12 @@ main.search_json("python", limit=5)  # {"query", "results", "total_results", "se
 - `POST /api/crawl` — **asynchronous**. Body is a JSON object mirroring
   the crawl options: `{"start_url": ..., "max_pages": ..., "delay": ...,
   "max_bytes": ..., "threads": ..., "allow": [...], "sitemap":
-  "auto"|"skip"|"only", "db": ...}` (`start_url` required; `url`
-  accepted as an alias; omitted/null = engine default). The config is
+  "auto"|"skip"|"only", "db": ..., "crawl_unavailable_robots": false}`
+  (`start_url` required; `url` accepted as an alias; omitted/null =
+  engine default; `crawl_unavailable_robots` is a bool, default false —
+  when true, crawl pages whose robots.txt cannot be verified
+  (fetch failure / timeout / non-200) instead of skipping them, while
+  explicit `Disallow` rules are still honored). The config is
   validated up front (400 with `{"error": ...}` on bad input, no job
   created), then a crawl job is started in the background and the
   endpoint responds immediately with
@@ -282,8 +287,8 @@ while the crawler writes to the same database.
 
 ## Running the Tests (Running or not running tests doesnt effect app functionality; skip if not interested.)
 
-403 tests run on the standard library's `unittest` against a local HTTP server —
-the Flask/JSON API tests (stages 18-19, 26-27) use Flask's test client, so no
+410 tests run on the standard library's `unittest` against a local HTTP server —
+the Flask/JSON API tests (stages 18-19, 26-28) use Flask's test client, so no
 server process needs to be started for them.
 **no external network access is needed**:
 

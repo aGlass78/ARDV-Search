@@ -40,8 +40,11 @@ POST /api/crawl
           "max_bytes": 2000000,   # optional, positive int
           "allow": ["host", "host/path"],   # optional, list of str
           "sitemap": "auto",      # optional: "auto" | "skip" | "only"
-          "db": "myindex.db"      # optional, str (also accepts "url"
+          "db": "myindex.db",     # optional, str (also accepts "url"
                                   #   as an alias for "start_url")
+          "crawl_unavailable_robots": false,  # optional, bool: crawl
+                                  #   pages whose robots.txt cannot be
+                                  #   verified (default false)
         }
 
     Omitted/null fields use engine defaults. Response (HTTP 202):
@@ -244,6 +247,7 @@ def create_app():
         allowed_keys = {
             "start_url", "url", "max_pages", "delay", "max_bytes",
             "threads", "allow", "sitemap", "db",
+            "crawl_unavailable_robots",
         }
         unexpected = set(data) - allowed_keys
         if unexpected:
@@ -258,6 +262,7 @@ def create_app():
             "allow": data.get("allow"),
             "sitemap": data.get("sitemap"),
             "db": data.get("db"),
+            "crawl_unavailable_robots": data.get("crawl_unavailable_robots"),
         }
 
         try:

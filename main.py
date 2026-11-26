@@ -1987,7 +1987,8 @@ def parse_retry_after(value):
 
 
 def fetch_html(session, url, max_bytes, scope=None,
-               limiter=None, robots_cache=None):
+               limiter=None, robots_cache=None,
+               crawl_unavailable_robots=False):
     """Download a bounded HTML response, following redirects manually.
 
     The scope AND robots.txt of every redirect destination are checked
@@ -2009,6 +2010,12 @@ def fetch_html(session, url, max_bytes, scope=None,
     is None, and text is None only when the body was skipped (non-200,
     non-HTML, or larger than max_bytes). The caller must close the
     response.
+
+    `crawl_unavailable_robots=True` relaxes only the *unavailable*
+    case: a redirect destination whose robots.txt cannot be verified is
+    still followed (treated as allow-all). Explicit blocks are still
+    enforced. When False (default), unverifiable robots.txt abandons
+    the chain with reason "robots_unavailable".
     """
     current = url
     response = None
@@ -2078,17 +2085,18 @@ def fetch_html(session, url, max_bytes, scope=None,
                     session, raw_next, limiter)
 
                 if robots is None:
-                    return (None, None, None,
-                            "robots_unavailable")
+                    if not crawl_unavailable_robots:
+                        return (None, None, None,
+                                "robots_unavailable")
+                else:
+                    crawl_delay = robots.crawl_delay(USER_AGENT)
 
-                crawl_delay = robots.crawl_delay(USER_AGENT)
+                    if crawl_delay and limiter is not None:
+                        limiter.set_min_delay(
+                            host_of(raw_next), crawl_delay)
 
-                if crawl_delay and limiter is not None:
-                    limiter.set_min_delay(
-                        host_of(raw_next), crawl_delay)
-
-                if not robots.can_fetch(USER_AGENT, raw_next):
-                    return None, None, None, "robots_blocked"
+                    if not robots.can_fetch(USER_AGENT, raw_next):
+                        return None, None, None, "robots_blocked"
 
             # Follow the exact Location (keeping any canonical trailing
             # slash) so the server does not redirect again; the scope
@@ -2162,6 +2170,7 @@ def process_url(
     max_bytes,
     limiter,
     robots_cache,
+    crawl_unavailable_robots=False,
 ):
     """Fetch and parse one URL in a worker thread."""
     result = {
@@ -2190,18 +2199,22 @@ def process_url(
     robots = robots_cache.rules_for(session, url, limiter)
 
     if robots is None:
-        result["status"] = "robots_unavailable"
-        return result
+        if not crawl_unavailable_robots:
+            result["status"] = "robots_unavailable"
+            return result
+        # Toggle enabled: robots.txt could not be verified, so treat
+        # it as allow-all for this URL (explicit rules, when they are
+        # available, are still enforced below).
+    else:
+        crawl_delay = robots.crawl_delay(USER_AGENT)
 
-    crawl_delay = robots.crawl_delay(USER_AGENT)
+        if crawl_delay:
+            limiter.set_min_delay(host, crawl_delay)
 
-    if crawl_delay:
-        limiter.set_min_delay(host, crawl_delay)
-
-    if not robots.can_fetch(USER_AGENT, url):
-        result["status"] = "robots_blocked"
-        result["message"] = f"Blocked by robots.txt: {url}"
-        return result
+        if not robots.can_fetch(USER_AGENT, url):
+            result["status"] = "robots_blocked"
+            result["message"] = f"Blocked by robots.txt: {url}"
+            return result
 
     response = None
 
@@ -2209,7 +2222,8 @@ def process_url(
         # fetch_html paces and robots-checks every hop itself before
         # following it.
         response, html, final_url, abandon_reason = fetch_html(
-            session, url, max_bytes, scope, limiter, robots_cache
+            session, url, max_bytes, scope, limiter, robots_cache,
+            crawl_unavailable_robots
         )
 
         if final_url is None:
@@ -2362,6 +2376,7 @@ def crawl(
     db_path=None,
     progress_callback=None,
     stop_event=None,
+    crawl_unavailable_robots=False,
 ):
     """Crawl concurrently; max_pages=None means unlimited.
 
@@ -2386,6 +2401,14 @@ def crawl(
     and `stats["interrupted"]` becomes True). Both the HTTP stop API
     (app.py) and the CLI's KeyboardInterrupt handler share this stop
     path.
+
+    `crawl_unavailable_robots` (default False) changes robots decision
+    making: when True, pages are crawled even when their host's
+    robots.txt cannot be verified (fetch failure, timeout, or a
+    non-200 response). Explicit `Disallow` rules are still honored -
+    the toggle only affects *unavailable* robots, treating it as
+    allow-all. When False (default), unverifiable robots.txt skips the
+    URL (stats["robots_unavailable"]).
     """
     start_url = normalize_url(start_url)
     scope = (
@@ -2624,6 +2647,7 @@ def crawl(
                     max_bytes,
                     limiter,
                     robots_cache,
+                    crawl_unavailable_robots,
                 )
                 pending[future] = url
 
@@ -2913,7 +2937,8 @@ def print_crawl_summary(stats):
 
 
 def _normalize_crawl_args(url, max_pages=None, delay=None, max_bytes=None,
-                          threads=None, allow=None, sitemap=None, db=None):
+                          threads=None, allow=None, sitemap=None, db=None,
+                          crawl_unavailable_robots=None):
     """Validate crawl inputs and return normalized kwargs for crawl_json().
 
     Raises ValueError(msg) on invalid input. None (or omitted) means
@@ -2968,6 +2993,11 @@ def _normalize_crawl_args(url, max_pages=None, delay=None, max_bytes=None,
     if db is not None and not isinstance(db, str):
         raise ValueError("db must be a string")
 
+    if crawl_unavailable_robots is None:
+        crawl_unavailable_robots = False
+    elif not isinstance(crawl_unavailable_robots, bool):
+        raise ValueError("crawl_unavailable_robots must be a boolean")
+
     return {
         "url": url,
         "max_pages": max_pages,
@@ -2977,12 +3007,14 @@ def _normalize_crawl_args(url, max_pages=None, delay=None, max_bytes=None,
         "allow": allow,
         "sitemap": sitemap,
         "db": db,
+        "crawl_unavailable_robots": crawl_unavailable_robots,
     }
 
 
 def crawl_json(url, max_pages=None, delay=None, max_bytes=None,
                threads=None, allow=None, sitemap=None, db=None,
-               progress_callback=None, stop_event=None):
+               progress_callback=None, stop_event=None,
+               crawl_unavailable_robots=None):
     """Run a crawl and return the JSON-compatible stats dictionary.
 
     Programmatic twin of crawl() for web frontends / the Flask API.
@@ -3012,6 +3044,10 @@ def crawl_json(url, max_pages=None, delay=None, max_bytes=None,
         threading.Event; once set, the crawl stops gracefully between
         units of work (same shared stop path as Ctrl+C). This is how
         the web API stops a running crawl.
+      - ``crawl_unavailable_robots``: bool (default False). When True,
+        the crawler treats *unavailable* robots.txt (fetch failure /
+        timeout / non-200) as allow-all instead of skipping the URL.
+        Explicit Disallow rules are still honored.
     """
     normalized = _normalize_crawl_args(
         url,
@@ -3022,6 +3058,7 @@ def crawl_json(url, max_pages=None, delay=None, max_bytes=None,
         allow=allow,
         sitemap=sitemap,
         db=db,
+        crawl_unavailable_robots=crawl_unavailable_robots,
     )
     result = crawl(
         normalized["url"],
@@ -3034,6 +3071,7 @@ def crawl_json(url, max_pages=None, delay=None, max_bytes=None,
         db_path=normalized["db"],
         progress_callback=progress_callback,
         stop_event=stop_event,
+        crawl_unavailable_robots=normalized["crawl_unavailable_robots"],
     )
     if result is None:
         # crawl() only returns None when the database could not be
@@ -3522,6 +3560,13 @@ def main():
              "result.db next to main.py; relative paths are anchored "
              "there too)"
     )
+    crawl_parser.add_argument(
+        "--crawl-unavailable-robots",
+        action="store_true",
+        help="crawl pages whose robots.txt cannot be verified (fetch "
+             "failure/timeout/non-200) instead of skipping them; "
+             "explicit Disallow rules are still honored"
+    )
 
     search_parser = commands.add_parser("search")
     search_parser.add_argument("query")
@@ -3604,6 +3649,7 @@ def main():
             allowed=extra_entries,
             sitemap=sitemap_mode,
             db_path=args.db,
+            crawl_unavailable_robots=args.crawl_unavailable_robots,
         )
 
         if stats:
